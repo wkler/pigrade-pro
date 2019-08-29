@@ -1,19 +1,19 @@
 /*                                                                                                                                             
- * pigrade-server - A simple CAN-over-IP gateway
+ * pigrade - A simple CAN-over-IP gateway
  * Copyright (C) 2016 Matthias Kruk                                                                                                            
  *                                                                                                                                             
- * pigrade-server is free software; you can redistribute it and/or modify                                                                               
+ * pigrade is free software; you can redistribute it and/or modify                                                                               
  * it under the terms of the GNU General Public License as published                                                                           
  * by the Free Software Foundation; either version 3, or (at your                                                                              
  * option) any later version.                                                                                                                  
  *                                                                                                                                             
- * pigrade-server is distributed in the hope that it will be useful, but                                                                                
+ * pigrade is distributed in the hope that it will be useful, but                                                                                
  * WITHOUT ANY WARRANTY; without even the implied warranty of                                                                                  
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU                                                                           
  * General Public License for more details.                                                                                                    
  *                                                                                                                                             
  * You should have received a copy of the GNU General Public License                                                                           
- * along with pigrade-server; see the file COPYING.  If not, write to the                                                                               
+ * along with pigrade; see the file COPYING.  If not, write to the                                                                               
  * Free Software Foundation, Inc., 59 Temple Place - Suite 330,                                                                                
  * Boston, MA 02111-1307, USA.                                                                                                                 
  */
@@ -348,6 +348,7 @@ static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
+	printf("Pigrade send with ORIGINAL finished | total sent: %d bytes (without CAN wrapper)\n", totSent);
     return totSent;
 }
 
@@ -399,9 +400,6 @@ typedef struct __packed{
 #define MQ_DIRTY_MARK            0x00
 #define MQ_FILE_MAX_LEN          (64*1024*1024 - 256) //64M BYTES
 //fixme: time period control
-
-
-
 
 
 uint8_t xor_buff [MQ_PACK_SIZE+256] = { 0 };
@@ -558,7 +556,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
-	printf("MQHP | total sent: %d bytes \n", totSent);
+	printf("Pigrade send with CAN-MQHP finished | total sent: %d bytes (without CAN wrapper)\n", totSent);
     return len;
 }
 
@@ -820,8 +818,12 @@ int main(int argc, char *argv[])
 			printf("Welcome: %s \n"
 					"\n"
 				   "[INFO]: \n"
-				   "Provide an IP-to-CAN gateway. By default, %s will fork to the background\n"
-				   "and listen for incoming connections on port %d.\n"
+				   "Provide an IP-to-CAN file transition with CAN-MQHP protocol for PITECH device upgrade\n"
+				   "By default, %s will not run as a daemon.\n"
+				   "By default, the transion protocol is file original format wrapped with can_frame_t struct\n"
+				   "The CAN-MQHP protocl will used at the option 'type' which is not orig type\n"
+				   "The file should smaller than 64 Mbytes\n"
+				   "It can listen for multi incoming connections on port %d.\n"
 				   "\n"
 				   "[OPTIONS]: \n"
 				   "  -h, --help        display this help and exit\n"
@@ -829,7 +831,7 @@ int main(int argc, char *argv[])
 				   "  -c, --connect     connect to the host specified by the next argument\n"
 				   "  -p, --port        use the port specified by the next argument\n"
 				   "  -I, --input       indicate the file path to be transfer(default from stdin)\nnote: max to 64MB file\n"
-				   "  -t, --type        specify the image type of the file(param: pico or panel)\n",
+				   "  -t, --type        specify the image type of the file( param: orig / pico / panel )\n",
 				   argv[0], CONFIG_MY_NAME, CONFIG_INET_PORT);
 			return(1);
 		} else if(strcmp(argv[ret_val], "--input") == 0 || strcmp(argv[ret_val], "-I") == 0) {
@@ -847,8 +849,13 @@ int main(int argc, char *argv[])
 			}
 		} else if(strcmp(argv[ret_val], "--type") == 0 || strcmp(argv[ret_val], "-t") == 0) {
 			if(++ret_val < argc) {
-				
-				img_type =	(argv[ret_val][1] == 'a') ?  "panel " : "pico  "; //keep 6 bytes.
+				if (argv[ret_val][1] == 'a'){
+					img_type = "panel "; //keep 6 bytes.
+				}else if(){
+					img_type = "pico  "; //keep 6 bytes.
+				}else{
+					img_type = "orig  "; //keep 6 bytes.
+				}	
 
 			} else {
 				fprintf(stderr, "Expected file path to be transfer after --input\n");

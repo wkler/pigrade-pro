@@ -2,7 +2,7 @@ DEPS = src
 PHONY = $(DEPS) clean mrproper
 
 all: $(DEPS)
-	mv src/pigrade-server .
+	mv src/pigrade .
 
 $(DEPS):
 	$(MAKE) -C $@ $(MAKECMDGOALS)
