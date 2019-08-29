@@ -12,8 +12,7 @@
 
 /* topic type definations */
 #define TOPIC_HOST_GLOBAL_CMD                0x07FF
-#define TOPIC_HOST_IMG_STREAM_PANEL          0x05FF
-#define TOPIC_HOST_IMG_STREAM_PICO           0x05FE
+#define TOPIC_HOST_IMG_STREAM                0x05FF
 
 #define TOPIC_PANEL_CMD_RESP                 0x7FE
 #define TOPIC_PANEL_RH                       0x2FE
@@ -56,10 +55,5 @@
 #define RESP_PING_PICO                          0x78
 
 
-
-
-
-void CAN_MQHP_task(void const * argument);
-void upgrade_task(void const * argument);
 
 #endif /* CAN_MQHP_H_ */

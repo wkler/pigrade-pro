@@ -10,6 +10,6 @@ $(DEPS):
 clean: $(DEPS)
 
 mrproper: $(DEPS)
-	rm -rf pigrade-server *~
+	rm -rf pigrade *~
 
 .PHONY: $(PHONY)

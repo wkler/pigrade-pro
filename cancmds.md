@@ -98,4 +98,9 @@ ff 03 00 00 08 00 00 00 11 ff 70 69 6e 67 77 fe
 
 root@SysHost:~ kill -9 1673 
 root@SysHost:~ netstat -ap | grep 'pigrade'
-root@SysHost:~ ./pigrade-server -p 8898 -d
+
+## run as a server.  
+root@SysHost:~ ./pigrade -p 8898 -d
+## run as a client.
+root@SysHost:~ ./pigrade -c 192.168.101.164 -p 8898 -d -I
+

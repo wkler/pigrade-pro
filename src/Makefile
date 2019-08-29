@@ -1,7 +1,7 @@
 CFLAGS = -Wall -g -Wextra -Wdouble-promotion -Wmissing-include-dirs -Wswitch-default -Wswitch-enum -c -fPIC -I.. -I.
 LDFLAGS = -lpthread
 OBJECTS = main.o array.o
-OUTNAME = pigrade-server
+OUTNAME = pigrade
 
 all: $(OUTNAME)
 

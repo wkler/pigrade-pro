@@ -22,7 +22,7 @@
 #ifndef __PIGRADE_CONFIG_H
 #define __PIGRADE_CONFIG_H
 
-#define CONFIG_MY_NAME        "pigrade-server"
+#define CONFIG_MY_NAME        "pigrade pro version ( server client all in one )"
 
 #define CONFIG_INET_PORT      3840
 #define CONFIG_INET_BACKLOG   16

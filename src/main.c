@@ -274,8 +274,6 @@ static int in6listen(unsigned short port)
 }
 #endif
 
-
-#define TOPIC_HOST_IMG_STREAM          0x05FFU
 /* fill can_frame with specific data, and send send it to out_fd */
 size_t send_with_canfrm(int out_fd, char* srcdata, size_t num)
 {
@@ -433,7 +431,7 @@ int calc_total_pkt_nbr(int len)
 static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
-    char buf[MQ_PACK_SIZE + 256];
+    unsigned char buf[MQ_PACK_SIZE + 256];
     int toRead, numRead, numSent, totSent = 0;
 	int left = len;
 	int sril_nbr = 0;
@@ -790,14 +788,14 @@ int main(int argc, char *argv[])
 	char *img_type = "orig  ";
 
 	port = CONFIG_INET_PORT;
-	flags = FLAG_DAEMON | FLAG_LISTEN;
+	flags = ~FLAG_DAEMON | FLAG_LISTEN;
 	hostname = NULL;
 	ret_val = 1;
 	run = 1;
 	
 	for(ret_val = 1; ret_val < argc; ret_val++) {
-		if(strcmp(argv[ret_val], "--dont-fork") == 0 || strcmp(argv[ret_val], "-d") == 0) {
-			flags &= ~FLAG_DAEMON;
+		if(strcmp(argv[ret_val], "--daemon") == 0 || strcmp(argv[ret_val], "-d") == 0) {
+			flags |= FLAG_DAEMON;
 		} else if(strcmp(argv[ret_val], "--connect") == 0 || strcmp(argv[ret_val], "-c") == 0) {
 			if(++ret_val < argc) {
 				flags &= ~FLAG_LISTEN;
@@ -819,13 +817,15 @@ int main(int argc, char *argv[])
 				return(1);
 			}
 		} else if(strcmp(argv[ret_val], "--help") == 0 || strcmp(argv[ret_val], "-h") == 0) {
-			printf("Usage: %s [OPTIONS]\n"
+			printf("Welcome: %s \n"
+					"\n"
+				   "[INFO]: \n"
 				   "Provide an IP-to-CAN gateway. By default, %s will fork to the background\n"
 				   "and listen for incoming connections on port %d.\n"
 				   "\n"
-				   "The following options are recognized:\n"
+				   "[OPTIONS]: \n"
 				   "  -h, --help        display this help and exit\n"
-				   "  -d, --dont-fork   don't fork to the background\n"
+				   "  -d, --daemon      run as a daemon (fork to the background)\n"
 				   "  -c, --connect     connect to the host specified by the next argument\n"
 				   "  -p, --port        use the port specified by the next argument\n"
 				   "  -I, --input       indicate the file path to be transfer(default from stdin)\nnote: max to 64MB file\n"
