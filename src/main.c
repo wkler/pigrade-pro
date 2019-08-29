@@ -57,7 +57,9 @@
 #define __max(_x, _y)		({ typeof (_x) _a = (_x); typeof (_y) _b = (_y); _a > _b ? _a : _b; })
 #define __min(_x, _y)		({ typeof (_x) _a = (_x); typeof (_y) _b = (_y); _a < _b ? _a : _b; })
 
-#define DEBUG 1
+#define DEBUG           1
+#define __packed             __attribute__ ((__packed__))
+//__attribute__ ((packed));
 
 typedef struct __packed {
 	uint8_t cmd;
@@ -68,16 +70,16 @@ typedef struct __packed {
 			uint8_t pack_hsty; //package history -- package nr to keep in fifo.//equal to group size.
 			uint32_t pack_total_nbr;//must be multiple of pack_hsty.
 			uint8_t __pad;
-		}
+		};
 		struct{
 			uint16_t pack_size; //contain the preheader and the realdata.
 			uint32_t realdata_total_len; //unit: byte
-		}
+		};
 		struct{
 			uint8_t img_type[6]; //"pico" or "panel"
-		}
+		};
 		
-	}
+	};
 } hostmsg;
 
 static unsigned short CRC16 ( unsigned char *puchMsg, unsigned short usDataLen );
@@ -302,7 +304,7 @@ size_t send_with_canfrm(int out_fd, char* srcdata, size_t num)
 
 //#include "common.h"
 #define BUF_SIZE 8192
-ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
+static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
 {
     off_t orig;
     char buf[BUF_SIZE];
@@ -428,7 +430,7 @@ int calc_total_pkt_nbr(int len)
 	return totpktnbr;
 }
 
-ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
+static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
     char buf[MQ_PACK_SIZE + 256];
@@ -436,7 +438,7 @@ ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, i
 	int left = len;
 	int sril_nbr = 0;
 	int pkgcnt = 0;//sril cnt in a group 
-	FEC_packet_t* packet = buf;
+	FEC_packet_t* packet = (FEC_packet_t*)buf;
 	int totpktnbr;
 	int need_add;
 	hostmsg msg;
@@ -456,30 +458,30 @@ ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, i
 		exit(-1);
 	}
 	/* starting send cmds of image config info  */
-	msg->cmd = CMD_CONFIG_IMG_INFO1;
-	msg->nodeid = NODE_ID_BROADCAST;
-	msg->pack_hsty = MQ_GROUP_SIZE; //package history -- package nr to keep in fifo.//equal to group size.
-	msg->pack_total_nbr = calc_total_pkt_nbr( len ); //must be multiple of pack_hsty.
-	msg->__pad = MQ_DIRTY_MARK;
-	ret = send_with_canfrm( out_fd, &msg, sizof(hostmsg));
-	if(ret != sizof(hostmsg)){
+	msg.cmd = CMD_CONFIG_IMG_INFO1;
+	msg.nodeid = NODE_ID_BROADCAST;
+	msg.pack_hsty = MQ_GROUP_SIZE; //package history -- package nr to keep in fifo.//equal to group size.
+	msg.pack_total_nbr = calc_total_pkt_nbr( len ); //must be multiple of pack_hsty.
+	msg.__pad = MQ_DIRTY_MARK;
+	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
+	if(ret != sizeof(hostmsg)){
 		printf("Error: CONFIG_IMG_INFO1 cannot send !\n");
 		exit(-1);
 	}
-	msg->cmd = CMD_CONFIG_IMG_INFO2;
-	msg->nodeid = NODE_ID_BROADCAST;
-	msg->pack_size = MQ_PACK_SIZE; //contain the preheader and the realdata.
-	msg->realdata_total_len = len; //unit: byte
-	ret = send_with_canfrm( out_fd, &msg, sizof(hostmsg));
-	if(ret != sizof(hostmsg)){
+	msg.cmd = CMD_CONFIG_IMG_INFO2;
+	msg.nodeid = NODE_ID_BROADCAST;
+	msg.pack_size = MQ_PACK_SIZE; //contain the preheader and the realdata.
+	msg.realdata_total_len = len; //unit: byte
+	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
+	if(ret != sizeof(hostmsg)){
 		printf("Error: CONFIG_IMG_INFO2 cannot send !\n");
 		exit(-1);
 	}
-	
-	msg->cmd = CMD_START_SEND_IMG;/* config the transision img type */
-	memcpy(msg->img_type, img_type, 6 );//"pico" or "panel"
-	ret = send_with_canfrm( out_fd, &msg, sizof(hostmsg));
-	if(ret != sizof(hostmsg)){
+
+	msg.cmd = CMD_START_SEND_IMG;/* config the transision img type */
+	memcpy(msg.img_type, img_type, 6 );//"pico" or "panel"
+	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
+	if(ret != sizeof(hostmsg)){
 		printf("Error: START_SEND_IMG cannot send !\n");
 		exit(-1);
 	}
@@ -558,7 +560,7 @@ ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, i
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
-	pritnf("MQHP | total sent: %d bytes \n", totSent);
+	printf("MQHP | total sent: %d bytes \n", totSent);
     return len;
 }
 
@@ -1056,10 +1058,10 @@ int main(int argc, char *argv[])
 			if(access(filepath,R_OK)==0 && (transfd = open(filepath,O_RDONLY))){
 				fstat(transfd,&stat_buf);
 				printf("Found file --> starting BINARY file data transfer.\n");
-				if (img_type == "orig  "){
-					sent_total = sendfile(netfd, transfd, &offset, stat_buf.st_size)
+				if ( strcmp(img_type, "orig  ") == 0 ){
+					sent_total = sendfile(netfd, transfd, &offset, stat_buf.st_size);
 				}else{
-					sent_total = sendfileuseMQHP(netfd, transfd, &offset, stat_buf.st_size)
+					sent_total = sendfileuseMQHP(img_type, netfd, transfd, &offset, stat_buf.st_size);
 				}
 				if(sent_total){
 					if(sent_total != stat_buf.st_size){
