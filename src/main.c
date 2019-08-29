@@ -35,7 +35,7 @@
 #include <array.h>
 #include <assert.h>
 #include <config.h>
-
+#include <CAN_MQHP.h>
 /* from extra part of simple ftp server's common.h */
 #define _GNU_SOURCE
 #include <sys/types.h>
@@ -58,6 +58,29 @@
 #define __min(_x, _y)		({ typeof (_x) _a = (_x); typeof (_y) _b = (_y); _a < _b ? _a : _b; })
 
 #define DEBUG 1
+
+typedef struct __packed {
+	uint8_t cmd;
+	uint8_t nodeid;
+	//uint8_t content[0];
+	union{
+		struct{ 
+			uint8_t pack_hsty; //package history -- package nr to keep in fifo.//equal to group size.
+			uint32_t pack_total_nbr;//must be multiple of pack_hsty.
+			uint8_t __pad;
+		}
+		struct{
+			uint16_t pack_size; //contain the preheader and the realdata.
+			uint32_t realdata_total_len; //unit: byte
+		}
+		struct{
+			uint8_t img_type[6]; //"pico" or "panel"
+		}
+		
+	}
+} hostmsg;
+
+static unsigned short CRC16 ( unsigned char *puchMsg, unsigned short usDataLen );
 
 static void hexdump(const void *_ptr, size_t len)
 {
@@ -374,6 +397,7 @@ typedef struct __packed{
 #define MQ_HEADER_LEN            sizeof(FEC_packet_t) 
 #define MQ_GROUP_SIZE            5 //alias of packet history
 #define MQ_DIRTY_MARK            0x00
+#define MQ_FILE_MAX_LEN          (64*1024*1024 - 256) //64M BYTES
 //fixme: time period control
 
 
@@ -388,7 +412,23 @@ void msg_xor( uint8_t *buff1, uint8_t *buff2, uint8_t *target, uint32_t len )
 	}
 }
 
-ssize_t sendfileuseMQHP(int out_fd, int in_fd, off_t * offset, int len )
+int calc_total_pkt_nbr(int len)
+{
+	int minpktnbr,remain,integer,totpktnbr,need_add_pkt;
+
+	//calc the minimium pkt nbr to be send. 
+	minpktnbr = (len + MQ_PACK_DATA_SIZE - 1) / MQ_PACK_DATA_SIZE;
+	//calc the actually total pktnbr to be send...must be a nbr of multiple MQ_GROUP_SIZE
+	integer = minpktnbr / (MQ_GROUP_SIZE - 1);
+	remain = minpktnbr - integer;
+	//additional redundant and dummy packet to satisfy condition: multiple of MQ_GROUP_SIZE
+	need_add_pkt = integer + MQ_GROUP_SIZE - remain;
+	totpktnbr = minpktnbr + need_add_pkt;
+
+	return totpktnbr;
+}
+
+ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
     char buf[MQ_PACK_SIZE + 256];
@@ -397,8 +437,10 @@ ssize_t sendfileuseMQHP(int out_fd, int in_fd, off_t * offset, int len )
 	int sril_nbr = 0;
 	int pkgcnt = 0;//sril cnt in a group 
 	FEC_packet_t* packet = buf;
-	int minpktnbr,remain,integer,totpktnbr,need_add_pkt;
+	int totpktnbr;
 	int need_add;
+	hostmsg msg;
+	size_t ret;
 
     if (offset != NULL) {
         /* Save current file offset and set offset to value in '*offset' */
@@ -408,19 +450,46 @@ ssize_t sendfileuseMQHP(int out_fd, int in_fd, off_t * offset, int len )
         if (lseek(in_fd, *offset, SEEK_SET) == -1)
             return -1;
     }
+	/* check the length of file prevent exceed 64M BYTES */
+	if (len > MQ_FILE_MAX_LEN){
+		printf("Error: input file exceed max file length !\n");
+		exit(-1);
+	}
+	/* starting send cmds of image config info  */
+	msg->cmd = CMD_CONFIG_IMG_INFO1;
+	msg->nodeid = NODE_ID_BROADCAST;
+	msg->pack_hsty = MQ_GROUP_SIZE; //package history -- package nr to keep in fifo.//equal to group size.
+	msg->pack_total_nbr = calc_total_pkt_nbr( len ); //must be multiple of pack_hsty.
+	msg->__pad = MQ_DIRTY_MARK;
+	ret = send_with_canfrm( out_fd, &msg, sizof(hostmsg));
+	if(ret != sizof(hostmsg)){
+		printf("Error: CONFIG_IMG_INFO1 cannot send !\n");
+		exit(-1);
+	}
+	msg->cmd = CMD_CONFIG_IMG_INFO2;
+	msg->nodeid = NODE_ID_BROADCAST;
+	msg->pack_size = MQ_PACK_SIZE; //contain the preheader and the realdata.
+	msg->realdata_total_len = len; //unit: byte
+	ret = send_with_canfrm( out_fd, &msg, sizof(hostmsg));
+	if(ret != sizof(hostmsg)){
+		printf("Error: CONFIG_IMG_INFO2 cannot send !\n");
+		exit(-1);
+	}
+	
+	msg->cmd = CMD_START_SEND_IMG;/* config the transision img type */
+	memcpy(msg->img_type, img_type, 6 );//"pico" or "panel"
+	ret = send_with_canfrm( out_fd, &msg, sizof(hostmsg));
+	if(ret != sizof(hostmsg)){
+		printf("Error: START_SEND_IMG cannot send !\n");
+		exit(-1);
+	}
 
-	//calc the minimium pkt nbr to be send. 
-	minpktnbr = (len + MQ_PACK_DATA_SIZE - 1) / MQ_PACK_DATA_SIZE;
-	//calc the actually total pktnbr to be send...must be a nbr of multiple MQ_GROUP_SIZE
-	integer = minpktnbr / (MQ_GROUP_SIZE - 1);
-	remain = minpktnbr - integer;
-		//additional redundant and dummy packet to satisfy condition: multiple of MQ_GROUP_SIZE
-	need_add_pkt = integer + MQ_GROUP_SIZE - remain;
-	totpktnbr = minpktnbr + need_add_pkt;
-
+	/* Preprocess */
+	totpktnbr = calc_total_pkt_nbr( len );
     totSent = 0;
 	left = len;
-    while (totpktnbr--) { //every time send a packet 
+	/* every loop send a packet  */
+    while (totpktnbr--) { 
 		sril_nbr++;
 		pkgcnt = (pkgcnt >= MQ_GROUP_SIZE ? 1 : pkgcnt+1);
 
@@ -433,13 +502,13 @@ ssize_t sendfileuseMQHP(int out_fd, int in_fd, off_t * offset, int len )
 				
 				if (numRead == -1){
 					printf("warning: numRead == -1.\n");
-					return -1;
+					exit(-1);
 				}else if (numRead == 0){
 					printf("warning: numRead == 0 (EOF).\n");
-					return -1;  /* EOF */ //fixme
+					exit(-1);  /* EOF */ //should never read this 
 				}else if (numRead != toRead){
 					printf("warning: input file numRead != toRead.\n");
-					return -1;
+					exit(-1);
 				}else{//equal is ok
 					left -= numRead;
 					need_add = MQ_PACK_DATA_SIZE - numRead;
@@ -467,10 +536,10 @@ ssize_t sendfileuseMQHP(int out_fd, int in_fd, off_t * offset, int len )
 		}
 		
 
-		/* sent packet! */
+		/* sent a packet! */
         numSent = send_with_canfrm(out_fd, buf, MQ_PACK_SIZE);
         if (numSent == -1)
-            return -1;
+            exit(-1);
         if (numSent == 0) {               /* Should never happen */
             perror("sendfile: send_with_canfrm() transferred 0 bytes");
             exit(-1);
@@ -479,8 +548,6 @@ ssize_t sendfileuseMQHP(int out_fd, int in_fd, off_t * offset, int len )
         
         totSent += numSent;
     }
-
-
 
     if (offset != NULL) {
         /* Return updated file offset in '*offset', and reset the file offset
@@ -491,7 +558,8 @@ ssize_t sendfileuseMQHP(int out_fd, int in_fd, off_t * offset, int len )
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
-    return totSent;
+	pritnf("MQHP | total sent: %d bytes \n", totSent);
+    return len;
 }
 
 
@@ -717,6 +785,7 @@ int main(int argc, char *argv[])
 	int err;
 	//FILE *infile = stdin;
 	char *filepath = "no-spcecify";
+	char *img_type = "orig  ";
 
 	port = CONFIG_INET_PORT;
 	flags = FLAG_DAEMON | FLAG_LISTEN;
@@ -753,11 +822,12 @@ int main(int argc, char *argv[])
 				   "and listen for incoming connections on port %d.\n"
 				   "\n"
 				   "The following options are recognized:\n"
+				   "  -h, --help        display this help and exit\n"
 				   "  -d, --dont-fork   don't fork to the background\n"
 				   "  -c, --connect     connect to the host specified by the next argument\n"
 				   "  -p, --port        use the port specified by the next argument\n"
-				   "  -h, --help        display this help and exit\n"
-				   "  -I, --input       indicate the file path to be transfer(default from stdin)\nnote: max to 64MB file\n",
+				   "  -I, --input       indicate the file path to be transfer(default from stdin)\nnote: max to 64MB file\n"
+				   "  -t, --type        specify the image type of the file(param: pico or panel)\n",
 				   argv[0], CONFIG_MY_NAME, CONFIG_INET_PORT);
 			return(1);
 		} else if(strcmp(argv[ret_val], "--input") == 0 || strcmp(argv[ret_val], "-I") == 0) {
@@ -773,7 +843,15 @@ int main(int argc, char *argv[])
 				fprintf(stderr, "Expected file path to be transfer after --input\n");
 				return(1);
 			}
+		} else if(strcmp(argv[ret_val], "--type") == 0 || strcmp(argv[ret_val], "-t") == 0) {
+			if(++ret_val < argc) {
+				
+				img_type =	(argv[ret_val][1] == 'a') ?  "panel " : "pico  "; //keep 6 bytes.
 
+			} else {
+				fprintf(stderr, "Expected file path to be transfer after --input\n");
+				return(1);
+			}
 		}
 	}
 
@@ -952,6 +1030,7 @@ int main(int argc, char *argv[])
 		}
 
 	} else { /* runing as client mode for trasfer binary file.*/
+		/* Client mode */
 		if((netfd = in4connect(hostname, port & 0xffff)) < 0) {
 			fprintf(stderr, "Unable to connect to %s:%d\n", hostname, port & 0xffff);
 		}else{//connetion is OK.
@@ -977,7 +1056,12 @@ int main(int argc, char *argv[])
 			if(access(filepath,R_OK)==0 && (transfd = open(filepath,O_RDONLY))){
 				fstat(transfd,&stat_buf);
 				printf("Found file --> starting BINARY file data transfer.\n");
-				if(sent_total = sendfile(netfd, transfd, &offset, stat_buf.st_size)){
+				if (img_type == "orig  "){
+					sent_total = sendfile(netfd, transfd, &offset, stat_buf.st_size)
+				}else{
+					sent_total = sendfileuseMQHP(netfd, transfd, &offset, stat_buf.st_size)
+				}
+				if(sent_total){
 					if(sent_total != stat_buf.st_size){
 						perror("sendfile");
 						printf("File send size not match.\n");
@@ -989,6 +1073,7 @@ int main(int argc, char *argv[])
 					printf("Failed to read file.sent_total = 0.\n");
 					exit(EXIT_SUCCESS);
 				}
+				
 			}else{
 				printf("File cannot found/open.\n");
 				exit(EXIT_SUCCESS);
@@ -1015,7 +1100,7 @@ int main(int argc, char *argv[])
 static unsigned char auchCRCHi[];
 static char auchCRCLo[];
 
-unsigned short CRC16 ( unsigned char *puchMsg, unsigned short usDataLen ) 
+static unsigned short CRC16 ( unsigned char *puchMsg, unsigned short usDataLen ) 
 /* The function returns the CRC as a unsigned short type */
 //unsigned char *puchMsg ; /* message to calculate CRC upon */
 //unsigned short usDataLen ; /* quantity of bytes in message */
