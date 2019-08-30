@@ -35,6 +35,7 @@
 #include <array.h>
 #include <assert.h>
 #include <config.h>
+#include <conio.h> 
 #include <CAN_MQHP.h>
 /* from extra part of simple ftp server's common.h */
 #define _GNU_SOURCE
@@ -348,7 +349,8 @@ static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
-	printf("Pigrade send with ORIGINAL finished | total sent: %d bytes (without CAN wrapper)\n", totSent);
+	printf("Send with ORIGINAL format CAN-ID: %04X \n",TOPIC_HOST_IMG_STREAM);
+	printf("Transmit finished | total sent: %d bytes (without CAN struct wrapper)\n", totSent);
     return totSent;
 }
 
@@ -426,6 +428,8 @@ int calc_total_pkt_nbr(int len)
 	return totpktnbr;
 }
 
+
+#define MQ_TRANS_TIME_INTERVAL     1500lu /* 1.5ms per Kbytes*/
 static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
@@ -439,6 +443,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	int need_add;
 	hostmsg msg;
 	size_t ret;
+	struct timeval tv1,tv2;
 
     if (offset != NULL) {
         /* Save current file offset and set offset to value in '*offset' */
@@ -481,16 +486,20 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		printf("Error: START_SEND_IMG cannot send !\n");
 		exit(-1);
 	}
+	/* wait at least 500ms for panel prepare receive packet */
+
 
 	/* Preprocess */
 	totpktnbr = calc_total_pkt_nbr( len );
     totSent = 0;
 	left = len;
 	/* every loop send a packet  */
-    while (totpktnbr--) { 
+	/* time control: send speed rate must < 1M/s( can bus max speed ) == 1K/s */
+
+    while (totpktnbr--) {
+		gettimeofday(&tv1,NULL);//log a time
 		sril_nbr++;
 		pkgcnt = (pkgcnt >= MQ_GROUP_SIZE ? 1 : pkgcnt+1);
-
 		/* prepare the packet to be send */
 		if(pkgcnt != MQ_GROUP_SIZE){
 			//first fill data part : numRead indicate the nbr read from the input file in a packet.
@@ -533,7 +542,6 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 			memset(xor_buff, MQ_DIRTY_MARK, sizeof(xor_buff));
 		}
 		
-
 		/* sent a packet! */
         numSent = send_with_canfrm(out_fd, buf, MQ_PACK_SIZE);
         if (numSent == -1)
@@ -543,8 +551,30 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
             exit(-1);
         }
 
-        
         totSent += numSent;
+
+		/* exam if the user press the key 's'top */
+		if(kbhit()){
+			if(getch() == 's'){
+				msg.cmd = CMD_STOP_SEND_IMG;/* config the transision img type */
+				msg.nodeid = NODE_ID_BROADCAST;
+				memcpy(msg.img_type, "123456", 6 );//"123456"
+				ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
+				if(ret != sizeof(hostmsg)){
+					printf("Error: CMD_STOP_SEND_IMG cannot send !\n");
+					exit(-1);
+				}
+				printf("warning: user stop transmitting.\n");
+				exit(EXIT_SUCCESS);
+			}
+		}
+
+		/* wait for time slice expired */
+		gettimeofday(&tv2,NULL);
+		while(((tv2.tv_sec*1000000 + tv2.tv_usec) - (tv1.tv_sec*1000000 + tv1.tv_usec)) < MQ_TRANS_TIME_INTERVAL){
+			;
+		}
+
     }
 
     if (offset != NULL) {
@@ -556,7 +586,9 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
-	printf("Pigrade send with CAN-MQHP finished | total sent: %d bytes (without CAN wrapper)\n", totSent);
+	printf("Send with CAN-MQHP CAN-ID: %04X \n",TOPIC_HOST_IMG_STREAM);
+	printf("Transmit finished | total sent: %d bytes (without CAN struct wrapper)\n", totSent);
+	
     return len;
 }
 

@@ -334,3 +334,68 @@ void ftserve_retr(int sock_control, int sock_data, char* filename)
 		fclose(fd);
 	}
 }
+
+
+
+
+
+
+
+	// 	struct timeval{
+	// long tv_sec; //秒
+	// long tv_usec; //微秒
+	// };
+	// struct timezone
+	// {
+	// int tz_minuteswest; //和Greenwich 时间差了多少分钟
+	// int tz_dsttime; //日光节约时间的状态
+	// }; 
+int gettimeofday (struct timeval * tv, struct timezone * tz)
+	gettimeofday(&tv,NULL);
+
+  
+	struct timeval tv;
+    gettimeofday(&tv,NULL);
+    printf("second:%ld\n",tv.tv_sec);  //秒
+    printf("millisecond:%ld\n",tv.tv_sec*1000 + tv.tv_usec/1000);  //毫秒
+    printf("microsecond:%ld\n",tv.tv_sec*1000000 + tv.tv_usec);  //微秒
+
+
+
+    1.unsigned int sleep(unsigned int seconds);  
+  sleep()会使当前程序休眠seconds秒。如果sleep()没睡饱，它将会返回还需要补眠的时间，否则一般返回零。 
+ 
+2.void usleep(unsigned long usec);  
+ usleep与sleep()类同，不同之处在于休眠的时间单位为毫秒（10E-6秒）。 
+ 
+3.int select(0,NULL,NULL,NULL,struct timeval *tv);  
+ 
+  可以利用select实现sleep()的功能，它将不会等待任何事件发生。 
+ 
+4.int nanosleep(struct timespec *req,struct timespec *rem);  
+  nanosleep会沉睡req所指定的时间，若rem为non-null，而且没睡饱，将会把要补眠的时间放在rem上。
+
+ ———————————————— 
+版权声明：本文为CSDN博主「YongXMan」的原创文章，遵循CC 4.0 BY-SA版权协议，转载请附上原文出处链接及本声明。
+原文链接：https://blog.csdn.net/geekcome/article/details/6554729
+
+实际上用select是万能的，下面的是一个使用select的例子：
+
+#include <time.h>
+#include <sys/time.h>
+ 
+void Sleep(int iSec,int iUsec)
+{
+       struct timeval tv;
+      tv.tv_sec=iSec;
+      tv.tv_usec=iUsec;
+      select(0,NULL,NULL,NULL,&tv);
+}
+iSec 为延时秒数,Usec为延时微秒数.
+
+注:
+1秒=1000毫秒=1000000微秒=1000000000纳秒=1000000000000皮秒=1000000000000000飞秒
+1s=1000ms=1000000us=1000000000ns=1000000000000ps=1000000000000000fs
+ ———————————————— 
+版权声明：本文为CSDN博主「YongXMan」的原创文章，遵循CC 4.0 BY-SA版权协议，转载请附上原文出处链接及本声明。
+原文链接：https://blog.csdn.net/geekcome/article/details/6554729
