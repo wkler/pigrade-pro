@@ -35,7 +35,10 @@
 #include <array.h>
 #include <assert.h>
 #include <config.h>
-#include <conio.h> 
+//#include <conio.h> 
+//#include <curses.h>
+//#include <ncurses.h>
+#include <kbhit.h>
 #include <CAN_MQHP.h>
 /* from extra part of simple ftp server's common.h */
 #define _GNU_SOURCE
@@ -429,7 +432,7 @@ int calc_total_pkt_nbr(int len)
 }
 
 
-#define MQ_TRANS_TIME_INTERVAL     1500lu /* 1.5ms per Kbytes*/
+#define MQ_TRANS_TIME_INTERVAL     1500 /* 1.5ms per Kbytes*/
 static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
@@ -493,6 +496,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	totpktnbr = calc_total_pkt_nbr( len );
     totSent = 0;
 	left = len;
+	init_keyboard();
 	/* every loop send a packet  */
 	/* time control: send speed rate must < 1M/s( can bus max speed ) == 1K/s */
 
@@ -555,7 +559,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 
 		/* exam if the user press the key 's'top */
 		if(kbhit()){
-			if(getch() == 's'){
+			if(readch() == 's'){
 				msg.cmd = CMD_STOP_SEND_IMG;/* config the transision img type */
 				msg.nodeid = NODE_ID_BROADCAST;
 				memcpy(msg.img_type, "123456", 6 );//"123456"
@@ -586,6 +590,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
+	close_keyboard();
 	printf("Send with CAN-MQHP CAN-ID: %04X \n",TOPIC_HOST_IMG_STREAM);
 	printf("Transmit finished | total sent: %d bytes (without CAN struct wrapper)\n", totSent);
 	
@@ -883,7 +888,7 @@ int main(int argc, char *argv[])
 			if(++ret_val < argc) {
 				if (argv[ret_val][1] == 'a'){
 					img_type = "panel "; //keep 6 bytes.
-				}else if(){
+				}else if(argv[ret_val][1] == 'i'){
 					img_type = "pico  "; //keep 6 bytes.
 				}else{
 					img_type = "orig  "; //keep 6 bytes.
