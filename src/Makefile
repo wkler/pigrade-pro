@@ -1,6 +1,6 @@
 CFLAGS = -Wall -g -Wextra -Wdouble-promotion -Wmissing-include-dirs -Wswitch-default -Wswitch-enum -c -fPIC -I.. -I.
-LDFLAGS = -lpthread
-OBJECTS = main.o array.o kbhit.o
+LDFLAGS = -lpthread -lncurses
+OBJECTS = main.o array.o kbhit.o progressbar.o statusbar.o
 OUTNAME = pigrade
 
 all: $(OUTNAME)

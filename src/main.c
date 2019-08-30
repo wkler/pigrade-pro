@@ -40,6 +40,9 @@
 //#include <ncurses.h>
 #include <kbhit.h>
 #include <CAN_MQHP.h>
+//#include <progress.h>
+ #include "progressbar.h"
+ #include "statusbar.h"
 /* from extra part of simple ftp server's common.h */
 #define _GNU_SOURCE
 #include <sys/types.h>
@@ -431,8 +434,14 @@ int calc_total_pkt_nbr(int len)
 	return totpktnbr;
 }
 
+void exit_with_kbclose( void )
+{
+	close_keyboard();
+	exit(-1);  /* EOF */ //should never read this 
+}
 
-#define MQ_TRANS_TIME_INTERVAL     1500 /* 1.5ms per Kbytes*/
+//#define MQ_TRANS_TIME_INTERVAL     (1*500*1000) /* 1.5ms per Kbytes*/
+#define MQ_TRANS_TIME_INTERVAL     (4500) /* 1.5ms per Kbytes*/
 static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
@@ -442,11 +451,12 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	int sril_nbr = 0;
 	int pkgcnt = 0;//sril cnt in a group 
 	FEC_packet_t* packet = (FEC_packet_t*)buf;
-	int totpktnbr;
+	int totpktnbr,totpktnbr_const;
 	int need_add;
 	hostmsg msg;
 	size_t ret;
-	struct timeval tv1,tv2;
+	struct timeval tv1,tv2,t_begin,t_end;
+	progressbar *bar;
 
     if (offset != NULL) {
         /* Save current file offset and set offset to value in '*offset' */
@@ -489,17 +499,22 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		printf("Error: START_SEND_IMG cannot send !\n");
 		exit(-1);
 	}
+	printf("LOG: send START_SEND_IMG request !\n");
 	/* wait at least 500ms for panel prepare receive packet */
-
-
+	usleep( 1000*1000 ); 
 	/* Preprocess */
 	totpktnbr = calc_total_pkt_nbr( len );
+	totpktnbr_const = totpktnbr;
+	printf("LOG: to be send [%d] packet  | file size [%d] bytes \n",totpktnbr,len);
     totSent = 0;
 	left = len;
 	init_keyboard();
+	/* progress strip init */
+	bar = progressbar_new_with_format("progress", totpktnbr, "|#|");
+
+	gettimeofday(&t_begin,NULL);
 	/* every loop send a packet  */
 	/* time control: send speed rate must < 1M/s( can bus max speed ) == 1K/s */
-
     while (totpktnbr--) {
 		gettimeofday(&tv1,NULL);//log a time
 		sril_nbr++;
@@ -513,13 +528,13 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 				
 				if (numRead == -1){
 					printf("warning: numRead == -1.\n");
-					exit(-1);
+					exit_with_kbclose();
 				}else if (numRead == 0){
 					printf("warning: numRead == 0 (EOF).\n");
-					exit(-1);  /* EOF */ //should never read this 
+					exit_with_kbclose();  /* EOF */ //should never read this 
 				}else if (numRead != toRead){
 					printf("warning: input file numRead != toRead.\n");
-					exit(-1);
+					exit_with_kbclose();
 				}else{//equal is ok
 					left -= numRead;
 					need_add = MQ_PACK_DATA_SIZE - numRead;
@@ -549,13 +564,17 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		/* sent a packet! */
         numSent = send_with_canfrm(out_fd, buf, MQ_PACK_SIZE);
         if (numSent == -1)
-            exit(-1);
+            exit_with_kbclose();
         if (numSent == 0) {               /* Should never happen */
             perror("sendfile: send_with_canfrm() transferred 0 bytes");
-            exit(-1);
+            exit_with_kbclose();
         }
 
         totSent += numSent;
+		
+		progressbar_inc(bar);
+		//progress_show(&bar, (float)sril_nbr);
+
 
 		/* exam if the user press the key 's'top */
 		if(kbhit()){
@@ -566,17 +585,16 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 				ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
 				if(ret != sizeof(hostmsg)){
 					printf("Error: CMD_STOP_SEND_IMG cannot send !\n");
-					exit(-1);
+					exit_with_kbclose();
 				}
 				printf("warning: user stop transmitting.\n");
-				exit(EXIT_SUCCESS);
+				exit_with_kbclose();
 			}
 		}
 
 		/* wait for time slice expired */
-		gettimeofday(&tv2,NULL);
 		while(((tv2.tv_sec*1000000 + tv2.tv_usec) - (tv1.tv_sec*1000000 + tv1.tv_usec)) < MQ_TRANS_TIME_INTERVAL){
-			;
+			gettimeofday(&tv2,NULL);
 		}
 
     }
@@ -590,9 +608,13 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
+	//end handle
+	progressbar_finish(bar);
 	close_keyboard();
-	printf("Send with CAN-MQHP CAN-ID: %04X \n",TOPIC_HOST_IMG_STREAM);
-	printf("Transmit finished | total sent: %d bytes (without CAN struct wrapper)\n", totSent);
+	gettimeofday(&t_end,NULL);
+	printf("Elapse: [ %.4lf ] seconds\n",((double)(t_end.tv_sec*1000000 + t_end.tv_usec) - (double)(t_begin.tv_sec*1000000 + t_begin.tv_usec))/1000000);
+	printf("Send with CAN-MQHP protocl CAN-ID ==> %04X \n",TOPIC_HOST_IMG_STREAM);
+	printf("total sent: %d bytes ( with CAN-MQHP wrapper | without CANframe wrapper )\n", totSent);
 	
     return len;
 }
@@ -1113,7 +1135,7 @@ int main(int argc, char *argv[])
 						printf("File send size not match.\n");
 						exit(EXIT_SUCCESS);
 					}else{
-						printf("File send OK.\n");
+						printf("File send successful.\n");
 					}
 				}else{
 					printf("Failed to read file.sent_total = 0.\n");

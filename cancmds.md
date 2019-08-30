@@ -102,5 +102,5 @@ root@SysHost:~ netstat -ap | grep 'pigrade'
 ## run as a server.  daemon mode
 root@SysHost:~ ./pigrade -p 8898 -d
 ## run as a client.  front mode
-root@SysHost:~ ./pigrade -c 192.168.101.164 -p 8898 -d -I ~/image.bin -t panel
+root@SysHost:~ ./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin -t panel
 
