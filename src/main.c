@@ -73,17 +73,17 @@ typedef struct __packed {
 	uint8_t cmd;
 	uint8_t nodeid;
 	//uint8_t content[0];
-	union{
-		struct{ 
+	union __packed{
+		struct __packed{ 
 			uint8_t pack_hsty; //package history -- package nr to keep in fifo.//equal to group size.
 			uint32_t pack_total_nbr;//must be multiple of pack_hsty.
 			uint8_t __pad;
 		};
-		struct{
+		struct __packed{
 			uint16_t pack_size; //contain the preheader and the realdata.
 			uint32_t realdata_total_len; //unit: byte
 		};
-		struct{
+		struct __packed{
 			uint8_t img_type[6]; //"pico" or "panel"
 		};
 		
@@ -506,6 +506,39 @@ void exit_with_kbclose( void )
 }
 
 
+int hashsum_cmdline(char* path, char* out_hash)
+{
+    FILE *fstream = NULL;
+    int found = -1;
+ 
+    memset(out_hash, 0, 96);  
+ 
+    //?ping?? 
+    //sprintf(buffer, "ping -c 1 %s", ip);
+	sprintf(out_hash, "shasum %s", path);
+    if (NULL == (fstream = popen(out_hash,"r"))){     
+        return -1;      
+    }   
+ 
+    //??????
+    while (NULL != fgets(out_hash, 96, fstream)) {  
+        //LOG_INFO("%s", buffer);
+        //?????????????
+		break;
+		found = 0;
+        // if (strstr(buffer, "bytes from") != NULL)
+        // {
+        //     //???
+        //     found = 0;
+        //     break;
+        // }
+    }
+ 
+    pclose(fstream);    
+
+    return found;     
+}
+
 static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
@@ -521,6 +554,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	size_t ret;
 	struct timeval tv1,tv2,t_begin,t_end;
 	progressbar *bar;
+	char hashvalue[96];
 
     if (offset != NULL) {
         /* Save current file offset and set offset to value in '*offset' */
@@ -535,6 +569,8 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		printf("Error: input file exceed max file length !\n");
 		exit(-1);
 	}
+	
+	//printf("hostmsg: %d !\n",sizeof(hostmsg));
 	/* starting send cmds of image config info  */
 	msg.cmd = CMD_CONFIG_IMG_INFO1;
 	msg.nodeid = NODE_ID_BROADCAST;
@@ -707,7 +743,7 @@ static int in4connect(const char *host, unsigned short port)
 			//setsockopt(fd, SOL_SOCKET, SO_RCVBUF,(const char*)&nRecvBuf,sizeof(int));
 			// ?????
 			//int nSendBuf = 1*1024*1024;//???32K
-			int nSendBuf = 8*1024*1024;//???32K
+			int nSendBuf = 32*1024;//???32K
 			setsockopt(fd, SOL_SOCKET, SO_SNDBUF,(const char*)&nSendBuf,sizeof(int));
 
 			if((err = connect(fd, p->ai_addr, p->ai_addrlen)) < 0) {
@@ -751,7 +787,7 @@ static int in4listen(unsigned short port)
 	}
 
 	//	?????
-	int nRecvBuf=1*1024*1024;//???32K
+	int nRecvBuf= 32*1024;//???32K
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF,(const char*)&nRecvBuf,sizeof(int));
 
 	if(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -1218,8 +1254,9 @@ int main(int argc, char *argv[])
 			struct stat stat_buf;
 			off_t offset = 0;
 			int sent_total = 0;
-			char cwd[100];
+			char cwd[96];
 			char *ret;
+			char hashsum[96];
 
 			if(strcmp(filepath, "no-spcecify") == 0){
 				printf("file path no spcecify, use default path.\n");
@@ -1228,13 +1265,19 @@ int main(int argc, char *argv[])
 				return (0);
 				strncat(cwd,"file.bin",20);
 				printf("default path: %s\n", cwd );
+				filepath = cwd;
 			}else{
 				;//path already assigned
 			}
 
+
 			if(access(filepath,R_OK)==0 && (transfd = open(filepath,O_RDONLY))){
 				fstat(transfd,&stat_buf);
 				printf("Found file --> starting BINARY file data transfer.\n");
+				/* do hash */
+				hashsum_cmdline(filepath, hashsum);
+				printf("SHA: %s", hashsum );
+
 				if ( strcmp(img_type, "orig  ") == 0 ){
 					sent_total = sendfile(netfd, transfd, &offset, stat_buf.st_size);
 				}else{
