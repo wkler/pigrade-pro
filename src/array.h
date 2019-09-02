@@ -40,8 +40,9 @@ struct array {
 												int __iter_##elem; \
 												for(__iter_##elem = 0; __iter_##elem < (arr)->a_size; __iter_##elem++) { \
 													type *elem = (type*)(arr)->a_data[__iter_##elem]; \
-													if((void*)elem > ARRAY_DIRTY_MARK) \
+													if((void*)elem > ARRAY_DIRTY_MARK){ \
 														what \
+													} \
 												} \
 												assert(pthread_mutex_unlock(&((arr)->a_lock)) == 0); \
 											}

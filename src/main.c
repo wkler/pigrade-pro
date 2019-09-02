@@ -35,6 +35,7 @@
 #include <array.h>
 #include <assert.h>
 #include <config.h>
+#include <math.h>
 //#include <conio.h> 
 //#include <curses.h>
 //#include <ncurses.h>
@@ -281,14 +282,70 @@ static int in6listen(unsigned short port)
 }
 #endif
 
+/* refs: https://blog.csdn.net/qq_41822235/article/details/80789361 */
+
+int getSign(unsigned num)       //?????
+{
+    int sign = num & (1<<31);
+    return sign == 0 ? 1 : -1; 
+}
+ 
+int getExp(unsigned num)        //??????
+{
+    int exp = 0;
+    for(int i = 23; i < 31; ++i)
+        exp |= (num & (1<<i));
+    exp = (exp>>23) - 127;
+    return exp;
+}
+ 
+int float2int(float ft) //float???int
+{
+    unsigned num;
+    memcpy(&num, &ft, sizeof(float)); //?float????????unsigned?
+ 
+    int exp = getExp(num); //??float?????????
+    if(exp < 0) //??????0?????????0.***,????????0
+    {
+        return 0;
+    }
+    else
+    {
+        int res = num & ((1<<23)-1);  //??mantissa ?????????
+        res |= 1<<23;   //??????1??
+        res >>= (23-exp); //???????????
+        return res*getSign(num);
+    }
+}
+/* time control relations */
+/*108   80   30   10*/
+#define STD_FRAME_FULL_BIT_NBR 		108  
+#define TARGET_CAN_RATE_KHZ    ((float)(1000))
+#define TARGET_CAN_RATE_HZ     ((float)(TARGET_CAN_RATE_KHZ) * 1000)
+#define REDUNDANT_TIME         3/* micro second */
+//#define STD_FRAME_INTER_TIME   1
+#define STD_FRAME_INTER_TIME   (float2int(((float)pow(10,6) / TARGET_CAN_RATE_HZ * (float)STD_FRAME_FULL_BIT_NBR)) + REDUNDANT_TIME)
+#define STD_FRAME_INTER_TIME2   (float2int(((float)pow(10,6) / TARGET_CAN_RATE_HZ * (float)STD_FRAME_FULL_BIT_NBR)) + REDUNDANT_TIME)
+// additional 2us for reduce alias.
+// t?? = 1 / ???? *10^6 * 108 
+
+
 /* fill can_frame with specific data, and send send it to out_fd */
 size_t send_with_canfrm(int out_fd, char* srcdata, size_t num)
 {
 	int sent,sendlen,left;
     struct can_frame frm;
+	uint64_t internal,time1,time2;
+	struct timeval tv;
     //numSent = write(out_fd, data, num);
+	internal = STD_FRAME_INTER_TIME;
+
     left = num;
     while(left){
+		gettimeofday(&tv,NULL);
+		time1 = (uint64_t)tv.tv_sec*1000000 + (uint64_t)tv.tv_usec;
+		//printf("time1 %llu\n",time1);
+
         sendlen = left > 8 ? 8 : left;
         frm.can_id = TOPIC_HOST_IMG_STREAM;
         frm.can_dlc = sendlen;
@@ -302,6 +359,14 @@ size_t send_with_canfrm(int out_fd, char* srcdata, size_t num)
             printf("failed: partial data sent\n");
             return -1;
         }
+
+		/* wait for time slice expired */
+		do{
+			gettimeofday(&tv,NULL);
+			time2 = (uint64_t)tv.tv_sec*1000000 + (uint64_t)tv.tv_usec;
+		}while( time2 - time1 < internal );
+		//printf("time2 %llu\n",time2);
+
     }
     
     return (num - left);
@@ -440,8 +505,7 @@ void exit_with_kbclose( void )
 	exit(-1);  /* EOF */ //should never read this 
 }
 
-//#define MQ_TRANS_TIME_INTERVAL     (1*500*1000) /* 1.5ms per Kbytes*/
-#define MQ_TRANS_TIME_INTERVAL     (4500) /* 1.5ms per Kbytes*/
+
 static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
@@ -491,7 +555,6 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		printf("Error: CONFIG_IMG_INFO2 cannot send !\n");
 		exit(-1);
 	}
-
 	msg.cmd = CMD_START_SEND_IMG;/* config the transision img type */
 	memcpy(msg.img_type, img_type, 6 );//"pico" or "panel"
 	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
@@ -510,13 +573,13 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	left = len;
 	init_keyboard();
 	/* progress strip init */
-	bar = progressbar_new_with_format("progress", totpktnbr, "|#|");
+	bar = progressbar_new_with_format("Progress", totpktnbr, "|#|");
 
 	gettimeofday(&t_begin,NULL);
 	/* every loop send a packet  */
 	/* time control: send speed rate must < 1M/s( can bus max speed ) == 1K/s */
     while (totpktnbr--) {
-		gettimeofday(&tv1,NULL);//log a time
+
 		sril_nbr++;
 		pkgcnt = (pkgcnt >= MQ_GROUP_SIZE ? 1 : pkgcnt+1);
 		/* prepare the packet to be send */
@@ -592,11 +655,6 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 			}
 		}
 
-		/* wait for time slice expired */
-		while(((tv2.tv_sec*1000000 + tv2.tv_usec) - (tv1.tv_sec*1000000 + tv1.tv_usec)) < MQ_TRANS_TIME_INTERVAL){
-			gettimeofday(&tv2,NULL);
-		}
-
     }
 
     if (offset != NULL) {
@@ -644,6 +702,13 @@ static int in4connect(const char *host, unsigned short port)
 				perror("socket");
 				continue;
 			}
+			// ?????
+			//int nRecvBuf=32*1024;//???32K
+			//setsockopt(fd, SOL_SOCKET, SO_RCVBUF,(const char*)&nRecvBuf,sizeof(int));
+			// ?????
+			//int nSendBuf = 1*1024*1024;//???32K
+			int nSendBuf = 8*1024*1024;//???32K
+			setsockopt(fd, SOL_SOCKET, SO_SNDBUF,(const char*)&nSendBuf,sizeof(int));
 
 			if((err = connect(fd, p->ai_addr, p->ai_addrlen)) < 0) {
 				ret_val = -errno;
@@ -684,6 +749,10 @@ static int in4listen(unsigned short port)
 	if(setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &err, sizeof(err)) < 0) {
 		perror("setsockopt");
 	}
+
+	//	?????
+	int nRecvBuf=1*1024*1024;//???32K
+	setsockopt(fd, SOL_SOCKET, SO_RCVBUF,(const char*)&nRecvBuf,sizeof(int));
 
 	if(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
 		err = errno;
@@ -762,14 +831,52 @@ static int cansock(void)
 	return(fd);
 }
 
+static uint32_t cnt_ENOBUFS = 0;
 static void broadcast_can(struct can_frame *frm)
-{
+{		
+	uint64_t internal,time1,time2;
+	struct timeval tv;
+
+	internal = STD_FRAME_INTER_TIME2;
+	gettimeofday(&tv,NULL);
+	time1 = (uint64_t)tv.tv_sec*1000000 + (uint64_t)tv.tv_usec;
 	ARRAY_FOREACH(ifaces, struct can_iface, iface, {
 			if(sendto(iface->fd, frm, sizeof(*frm), 0, (struct sockaddr*)&(iface->addr), sizeof(iface->addr)) < 0) {
-				perror("sendto");
+				//perror("CAN-sendto");
+				if(errno == ENOBUFS){
+					cnt_ENOBUFS++;
+					if(cnt_ENOBUFS == 1){
+						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
+						printf("send speed is too fast -- missing a can frame\n",cnt_ENOBUFS);
+						printf("FAILURE: transmit failed -- plz redo\n",cnt_ENOBUFS);
+					}else if(cnt_ENOBUFS == 10){
+						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
+					}else if(cnt_ENOBUFS == 100){
+						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
+					}else if(cnt_ENOBUFS == 1000){
+						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
+					}else if(cnt_ENOBUFS == 10000){
+						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
+					}else if(cnt_ENOBUFS == 100000){
+						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
+					}else if(cnt_ENOBUFS == 1000000){
+						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
+					}else if(cnt_ENOBUFS == 10000000){
+						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
+					}else{
+						;
+					}
+					
+				}
+				
 			}
 		});
 	
+	/* wait for time slice expired */
+	do{
+		gettimeofday(&tv,NULL);
+		time2 = (uint64_t)tv.tv_sec*1000000 + (uint64_t)tv.tv_usec;
+	}while( time2 - time1 < internal );
 	return;
 }
 
@@ -829,6 +936,7 @@ static void sigsetup(void)
 	return;
 }
 
+int verbose = 0;
 int main(int argc, char *argv[])
 {
 	struct epoll_event ev[CONFIG_EPOLL_INITSIZE];
@@ -843,6 +951,7 @@ int main(int argc, char *argv[])
 	//FILE *infile = stdin;
 	char *filepath = "no-spcecify";
 	char *img_type = "orig  ";
+	
 
 	port = CONFIG_INET_PORT;
 	flags = ~FLAG_DAEMON | FLAG_LISTEN;
@@ -890,7 +999,8 @@ int main(int argc, char *argv[])
 				   "  -c, --connect     connect to the host specified by the next argument\n"
 				   "  -p, --port        use the port specified by the next argument\n"
 				   "  -I, --input       indicate the file path to be transfer(default from stdin)\nnote: max to 64MB file\n"
-				   "  -t, --type        specify the image type of the file( param: orig / pico / panel )\n",
+				   "  -t, --type        specify the image type of the file( param: orig / pico / panel )\n"
+				   "  -v, --verbose     display the details of TX/RX info\n",
 				   argv[0], CONFIG_MY_NAME, CONFIG_INET_PORT);
 			return(1);
 		} else if(strcmp(argv[ret_val], "--input") == 0 || strcmp(argv[ret_val], "-I") == 0) {
@@ -917,9 +1027,11 @@ int main(int argc, char *argv[])
 				}	
 
 			} else {
-				fprintf(stderr, "Expected file path to be transfer after --input\n");
+				fprintf(stderr, "Expected image type after --input\n");
 				return(1);
 			}
+		} else if(strcmp(argv[ret_val], "--verbose") == 0 || strcmp(argv[ret_val], "-v") == 0) {
+			verbose = 1;
 		}
 	}
 
@@ -1001,7 +1113,7 @@ int main(int argc, char *argv[])
 								
 								char *address_str = inet_ntoa(new_con->addr.sin_addr);
 								//char *inet_ntoa(struct in_addr);
-								printf("a NEW CONNECTION from: %s \n\n",address_str);
+								printf("a NEW connection from: %s \n\n",address_str);
 								if(new_con->fd < 0) {
 									free(new_con);
 								} else {
@@ -1028,12 +1140,11 @@ int main(int argc, char *argv[])
 							if((flen = read(con->fd, &frm, sizeof(frm))) < 0) {
 								perror("read");
 							} else if(flen == sizeof(frm)) {
-								#ifdef DEBUG
-								printf("recv from CAN: ");
-								hexdump(&frm, sizeof(frm));
-								printf("\n");
-								#endif // DEBUG
-
+								if(verbose){
+									printf("recv from CAN: ");
+									hexdump(&frm, sizeof(frm));
+									printf("\n");
+								}
 								broadcast_net(&frm);
 							} else {
 								fprintf(stderr, "flen = %d\n", flen);
@@ -1065,11 +1176,11 @@ int main(int argc, char *argv[])
 								/* send out the frames that were fully buffered */
 							
 								while(idx < CONFIG_BUFFER_FRAMES && new_dlen >= sizeof(struct can_frame)) {
-									#ifdef DEBUG
-									printf("recv from tcp: ");
-									hexdump(&(con->data.frame[idx]), sizeof(struct can_frame));
-									printf("\n");
-									#endif
+									if(verbose){
+										printf("recv from tcp: ");
+										hexdump(&(con->data.frame[idx]), sizeof(struct can_frame));
+										printf("\n");
+									}
 									broadcast_can(&(con->data.frame[idx]));
 									broadcast_net2(&(con->data.frame[idx]), con);
 									idx++;

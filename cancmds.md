@@ -99,8 +99,28 @@ ff 03 00 00 08 00 00 00 11 ff 70 69 6e 67 77 fe
 root@SysHost:~ kill -9 1673 
 root@SysHost:~ netstat -ap | grep 'pigrade'
 
+echo 1000 > /sys/class/net/can0/tx_queue_len
+cat /sys/class/net/can0/tx_queue_len
+ulimit -s 16384 
+
 ## run as a server.  daemon mode
+ulimit -s 16384 
+echo 1000 > /sys/class/net/can0/tx_queue_len
+echo 100 > /sys/class/net/can0/tx_queue_len
+ip link set can0 up type can bitrate 1000000
 root@SysHost:~ ./pigrade -p 8898 -d
 ## run as a client.  front mode
+ulimit -s 16384
 root@SysHost:~ ./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin -t panel
+ip -details -statistics link show can0
+
+
+Examples:
+
+ifconfig can0 txqueuelen 1000
+
+or
+
+ip link set can0 txqueuelen 1000
+
 
