@@ -284,13 +284,13 @@ static int in6listen(unsigned short port)
 
 /* refs: https://blog.csdn.net/qq_41822235/article/details/80789361 */
 
-int getSign(unsigned num)       //?????
+int getSign(unsigned num)     
 {
     int sign = num & (1<<31);
     return sign == 0 ? 1 : -1; 
 }
  
-int getExp(unsigned num)        //??????
+int getExp(unsigned num)      
 {
     int exp = 0;
     for(int i = 23; i < 31; ++i)
@@ -299,21 +299,21 @@ int getExp(unsigned num)        //??????
     return exp;
 }
  
-int float2int(float ft) //float???int
+int float2int(float ft) 
 {
     unsigned num;
-    memcpy(&num, &ft, sizeof(float)); //?float????????unsigned?
+    memcpy(&num, &ft, sizeof(float)); 
  
-    int exp = getExp(num); //??float?????????
-    if(exp < 0) //??????0?????????0.***,????????0
+    int exp = getExp(num); 
+    if(exp < 0) 
     {
         return 0;
     }
     else
     {
-        int res = num & ((1<<23)-1);  //??mantissa ?????????
-        res |= 1<<23;   //??????1??
-        res >>= (23-exp); //???????????
+        int res = num & ((1<<23)-1);  
+        res |= 1<<23;   
+        res >>= (23-exp);
         return res*getSign(num);
     }
 }
@@ -322,16 +322,16 @@ int float2int(float ft) //float???int
 #define STD_FRAME_FULL_BIT_NBR 		108  
 #define TARGET_CAN_RATE_KHZ    ((float)(1000))
 #define TARGET_CAN_RATE_HZ     ((float)(TARGET_CAN_RATE_KHZ) * 1000)
-#define REDUNDANT_TIME         3/* micro second */
+#define REDUNDANT_TIME         120/* micro second */ //4,8,30(reduce some errs), 60,
 //#define STD_FRAME_INTER_TIME   1
 #define STD_FRAME_INTER_TIME   (float2int(((float)pow(10,6) / TARGET_CAN_RATE_HZ * (float)STD_FRAME_FULL_BIT_NBR)) + REDUNDANT_TIME)
 #define STD_FRAME_INTER_TIME2   (float2int(((float)pow(10,6) / TARGET_CAN_RATE_HZ * (float)STD_FRAME_FULL_BIT_NBR)) + REDUNDANT_TIME)
 // additional 2us for reduce alias.
-// t?? = 1 / ???? *10^6 * 108 
+//  t标准 = 1 / 目标速率 *10^6 * 108 
 
 
 /* fill can_frame with specific data, and send send it to out_fd */
-size_t send_with_canfrm(int out_fd, char* srcdata, size_t num)
+size_t send_with_canfrm(int out_fd, char* srcdata, size_t num, canid_t canid)
 {
 	int sent,sendlen,left;
     struct can_frame frm;
@@ -347,7 +347,7 @@ size_t send_with_canfrm(int out_fd, char* srcdata, size_t num)
 		//printf("time1 %llu\n",time1);
 
         sendlen = left > 8 ? 8 : left;
-        frm.can_id = TOPIC_HOST_IMG_STREAM;
+        frm.can_id = canid;
         frm.can_dlc = sendlen;
         memcpy(frm.data, srcdata + num - left, sendlen);
         sent = write(out_fd, &frm, sizeof(frm));
@@ -368,8 +368,12 @@ size_t send_with_canfrm(int out_fd, char* srcdata, size_t num)
 		//printf("time2 %llu\n",time2);
 
     }
-    
-    return (num - left);
+    if (left != 0){
+		printf("send_with_canfrm failed: left != 0\n");
+		exit_with_kbclose();
+	}
+	
+    return num;
 }
 
 //#include "common.h"
@@ -399,7 +403,7 @@ static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
         if (numRead == 0)
             break;                      /* EOF */
 
-        numSent = send_with_canfrm(out_fd, buf, numRead);
+        numSent = send_with_canfrm(out_fd, buf, numRead, TOPIC_HOST_IMG_STREAM);
         if (numSent == -1)
             return -1;
         if (numSent == 0) {               /* Should never happen */
@@ -458,11 +462,11 @@ static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
 /* example: a packet size 1030 means it contain a preheader partial and a realdata partical. */
 
 
-typedef struct __packed{
+typedef struct __packed {
 	uint16_t marker;//always be character "aa55"
 	uint16_t serial_nbr; //start with '1', max to 64MB image. // 65536*1024/1024/1024
 	uint16_t crc;
-	uint8_t data[0];
+	//uint8_t data[0];
 
 } FEC_packet_t;
 
@@ -490,8 +494,9 @@ int calc_total_pkt_nbr(int len)
 	//calc the minimium pkt nbr to be send. 
 	minpktnbr = (len + MQ_PACK_DATA_SIZE - 1) / MQ_PACK_DATA_SIZE;
 	//calc the actually total pktnbr to be send...must be a nbr of multiple MQ_GROUP_SIZE
+	//redundant_pkt = ( minpktnbr + (MQ_GROUP_SIZE - 2) ) / (MQ_GROUP_SIZE - 1);
 	integer = minpktnbr / (MQ_GROUP_SIZE - 1);
-	remain = minpktnbr - integer;
+	remain = minpktnbr - ( integer * (MQ_GROUP_SIZE - 1) );
 	//additional redundant and dummy packet to satisfy condition: multiple of MQ_GROUP_SIZE
 	need_add_pkt = integer + MQ_GROUP_SIZE - remain;
 	totpktnbr = minpktnbr + need_add_pkt;
@@ -577,50 +582,59 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	msg.pack_hsty = MQ_GROUP_SIZE; //package history -- package nr to keep in fifo.//equal to group size.
 	msg.pack_total_nbr = calc_total_pkt_nbr( len ); //must be multiple of pack_hsty.
 	msg.__pad = MQ_DIRTY_MARK;
-	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
+	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg), TOPIC_HOST_GLOBAL_CMD);
 	if(ret != sizeof(hostmsg)){
 		printf("Error: CONFIG_IMG_INFO1 cannot send !\n");
 		exit(-1);
 	}
+	usleep( 100*1000 ); 
+
 	msg.cmd = CMD_CONFIG_IMG_INFO2;
 	msg.nodeid = NODE_ID_BROADCAST;
 	msg.pack_size = MQ_PACK_SIZE; //contain the preheader and the realdata.
 	msg.realdata_total_len = len; //unit: byte
-	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
+	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg), TOPIC_HOST_GLOBAL_CMD);
 	if(ret != sizeof(hostmsg)){
 		printf("Error: CONFIG_IMG_INFO2 cannot send !\n");
 		exit(-1);
 	}
+	usleep( 100*1000 ); 
+
 	msg.cmd = CMD_START_SEND_IMG;/* config the transision img type */
 	memcpy(msg.img_type, img_type, 6 );//"pico" or "panel"
-	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
+	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg), TOPIC_HOST_GLOBAL_CMD);
 	if(ret != sizeof(hostmsg)){
 		printf("Error: START_SEND_IMG cannot send !\n");
 		exit(-1);
 	}
 	printf("LOG: send START_SEND_IMG request !\n");
 	/* wait at least 500ms for panel prepare receive packet */
-	usleep( 1000*1000 ); 
+	usleep( 2*1000*1000 ); 
 	/* Preprocess */
 	totpktnbr = calc_total_pkt_nbr( len );
 	totpktnbr_const = totpktnbr;
-	printf("LOG: to be send [%d] packet  | file size [%d] bytes \n",totpktnbr,len);
+	printf("LOG: to be send [%d] packet  | file size [%d] bytes | grpnbr [%d]\n",totpktnbr,len, totpktnbr/MQ_GROUP_SIZE );
     totSent = 0;
+	sril_nbr = 0;
 	left = len;
+	//clear xor_buff 
+	memset(xor_buff, MQ_DIRTY_MARK, sizeof(xor_buff));
 	init_keyboard();
 	/* progress strip init */
 	bar = progressbar_new_with_format("Progress", totpktnbr, "|#|");
 
 	gettimeofday(&t_begin,NULL);
+
 	/* every loop send a packet  */
 	/* time control: send speed rate must < 1M/s( can bus max speed ) == 1K/s */
     while (totpktnbr--) {
-
 		sril_nbr++;
 		pkgcnt = (pkgcnt >= MQ_GROUP_SIZE ? 1 : pkgcnt+1);
+
 		/* prepare the packet to be send */
+
+		//first fill data part : numRead indicate the nbr read from the input file in a packet.
 		if(pkgcnt != MQ_GROUP_SIZE){
-			//first fill data part : numRead indicate the nbr read from the input file in a packet.
 			if(left){			
 				toRead = left < MQ_PACK_DATA_SIZE ? left : MQ_PACK_DATA_SIZE;
 				numRead = read(in_fd, buf + MQ_HEADER_LEN, toRead);	
@@ -641,36 +655,38 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 			}else{
 				need_add = MQ_PACK_DATA_SIZE;
 			}
+
 			if(need_add){ //fill the dummy data into empty part of the packet.
 				memset( buf + MQ_PACK_DATA_SIZE - need_add, MQ_DIRTY_MARK, need_add );
 			}
 
-			//next fill header part
-			packet->marker = 0xaa55;
-			packet->serial_nbr = sril_nbr;
-			packet->crc = CRC16( buf + MQ_HEADER_LEN, MQ_PACK_DATA_SIZE);
-
 			//xor for FEC	
-			msg_xor( xor_buff, buf, xor_buff, MQ_PACK_SIZE );
+			msg_xor( xor_buff, buf + MQ_HEADER_LEN, xor_buff, MQ_PACK_DATA_SIZE );
 
 		}else{// is the last pkt in this group.
-			//fill packet 
-			memcpy( buf, xor_buff, MQ_PACK_SIZE );
+			//fill data part 
+			memcpy( buf + MQ_HEADER_LEN, xor_buff, MQ_PACK_DATA_SIZE );
 			//clear xor_buff 
-			memset(xor_buff, MQ_DIRTY_MARK, sizeof(xor_buff));
+			memset(xor_buff, MQ_DIRTY_MARK, MQ_PACK_DATA_SIZE);
 		}
+
+		//next fill header part
+		packet->marker = 0xaa55;
+		packet->serial_nbr = sril_nbr;
+		packet->crc = CRC16( buf + MQ_HEADER_LEN, MQ_PACK_DATA_SIZE);
+
 		
-		/* sent a packet! */
-        numSent = send_with_canfrm(out_fd, buf, MQ_PACK_SIZE);
-        if (numSent == -1)
-            exit_with_kbclose();
-        if (numSent == 0) {               /* Should never happen */
+		/* then sent a packet! */
+        numSent = send_with_canfrm(out_fd, buf, MQ_PACK_SIZE, TOPIC_HOST_IMG_STREAM);
+        if (numSent == -1){
+			exit_with_kbclose();
+		}else if (numSent == 0) {               /* Should never happen */
             perror("sendfile: send_with_canfrm() transferred 0 bytes");
             exit_with_kbclose();
-        }
-
-        totSent += numSent;
-		
+        }else{ //send success.
+			totSent += numSent;
+		}
+        	
 		progressbar_inc(bar);
 		//progress_show(&bar, (float)sril_nbr);
 
@@ -681,7 +697,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 				msg.cmd = CMD_STOP_SEND_IMG;/* config the transision img type */
 				msg.nodeid = NODE_ID_BROADCAST;
 				memcpy(msg.img_type, "123456", 6 );//"123456"
-				ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg));
+				ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg), TOPIC_HOST_GLOBAL_CMD);
 				if(ret != sizeof(hostmsg)){
 					printf("Error: CMD_STOP_SEND_IMG cannot send !\n");
 					exit_with_kbclose();
