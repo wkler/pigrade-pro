@@ -322,7 +322,7 @@ int float2int(float ft)
 #define STD_FRAME_FULL_BIT_NBR 		108  
 #define TARGET_CAN_RATE_KHZ    ((float)(1000))
 #define TARGET_CAN_RATE_HZ     ((float)(TARGET_CAN_RATE_KHZ) * 1000)
-#define REDUNDANT_TIME         120/* micro second */ //4,8,30(reduce some errs), 60,
+#define REDUNDANT_TIME         5/* micro second */ //4,8,30(reduce some errs), 60,
 //#define STD_FRAME_INTER_TIME   1
 #define STD_FRAME_INTER_TIME   (float2int(((float)pow(10,6) / TARGET_CAN_RATE_HZ * (float)STD_FRAME_FULL_BIT_NBR)) + REDUNDANT_TIME)
 #define STD_FRAME_INTER_TIME2   (float2int(((float)pow(10,6) / TARGET_CAN_RATE_HZ * (float)STD_FRAME_FULL_BIT_NBR)) + REDUNDANT_TIME)
@@ -543,7 +543,7 @@ int hashsum_cmdline(char* path, char* out_hash)
 
     return found;     
 }
-
+int printflag = 1;
 static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
@@ -674,7 +674,11 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		packet->marker = 0xaa55;
 		packet->serial_nbr = sril_nbr;
 		packet->crc = CRC16( buf + MQ_HEADER_LEN, MQ_PACK_DATA_SIZE);
-
+//for DEBUG		
+		if (printflag){
+			printf("crc16: [%04X]\n",packet->crc);
+			printflag = 0;
+		}
 		
 		/* then sent a packet! */
         numSent = send_with_canfrm(out_fd, buf, MQ_PACK_SIZE, TOPIC_HOST_IMG_STREAM);

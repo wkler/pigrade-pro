@@ -123,4 +123,30 @@ or
 
 ip link set can0 txqueuelen 1000
 
+ip link set can0 type can tq 75 prop-seg 6 phase-seg1 7 phase-seg2 2 sjw 1 
 
+
+
+
+
+Can Open 失败
+
+未运行 参数设置命令
+ip link set CanX up type can bitrate 500000
+Can 错误处理
+
+出现太多的错误 设备可能计入总线关闭状态，给canrestart-ms 设置一个非零值，可以开启总线关闭自动恢复功能
+ip link set CanX type can restart-ms 100
+————————————————
+版权声明：本文为CSDN博主「jionfull」的原创文章，遵循 CC 4.0 BY-SA 版权协议，转载请附上原文出处链接及本声明。
+原文链接：https://blog.csdn.net/jionfull/article/details/82490625
+
+
+
+https://blog.csdn.net/lybhit/article/details/78663347
+
+ip link set can0 type can tq 125 prop-seg 6 phase-seg1 7 phase-seg2 2 sjw 1
+
+ip link set can0 type can tq 25 prop-seg 23 phase-seg1 8 phase-seg2 8 sjw 1
+
+ip link set can0 type can tq 50 prop-seg 11 phase-seg1 4 phase-seg2 4 sjw 1
