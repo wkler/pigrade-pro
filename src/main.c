@@ -22,6 +22,7 @@
 #include <sys/socket.h>
 #include <sys/ioctl.h>
 #include <linux/can.h>
+#include <linux/can/raw.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -41,6 +42,7 @@
 //#include <ncurses.h>
 #include <kbhit.h>
 #include <CAN_MQHP.h>
+#include <termios.h>
 //#include <progress.h>
  #include "progressbar.h"
  #include "statusbar.h"
@@ -57,6 +59,7 @@
 #include <time.h>
 #include <libgen.h>
 #include <sys/time.h>
+
 
 
 #define FLAG_DAEMON 1
@@ -91,6 +94,9 @@ typedef struct __packed {
 } hostmsg;
 
 static unsigned short CRC16 ( unsigned char *puchMsg, unsigned short usDataLen );
+static void broadcast_can(struct can_frame *frm);
+
+
 
 static void hexdump(const void *_ptr, size_t len)
 {
@@ -317,19 +323,194 @@ int float2int(float ft)
         return res*getSign(num);
     }
 }
+
+
+static uint32_t cnt_ENOBUFSTC = 0;
+static void broadcast_can_no_TC(struct can_frame *frm)
+{		
+
+	ARRAY_FOREACH(ifaces, struct can_iface, iface, {
+			//printf("s1\n");
+			if(sendto(iface->fd, frm, sizeof(*frm), 0, (struct sockaddr*)&(iface->addr), sizeof(iface->addr)) < 0) {
+				//perror("CAN-sendto");
+				printf("s2\n");
+				if(errno == ENOBUFS){
+					cnt_ENOBUFSTC++;
+					if(cnt_ENOBUFSTC == 1){
+						printf("cnt_ENOBUFSTC: %lu \n",cnt_ENOBUFSTC);
+						printf("send speed is too fast -- missing a can frame\n",cnt_ENOBUFSTC);
+						printf("FAILURE: transmit failed -- plz redo\n",cnt_ENOBUFSTC);
+					}else if(cnt_ENOBUFSTC == 10){
+						printf("cnt_ENOBUFSTC: %lu \n",cnt_ENOBUFSTC);
+					}else if(cnt_ENOBUFSTC == 100){
+						printf("cnt_ENOBUFSTC: %lu \n",cnt_ENOBUFSTC);
+					}else if(cnt_ENOBUFSTC == 1000){
+						printf("cnt_ENOBUFSTC: %lu \n",cnt_ENOBUFSTC);
+					}else if(cnt_ENOBUFSTC == 10000){
+						printf("cnt_ENOBUFSTC: %lu \n",cnt_ENOBUFSTC);
+					}else if(cnt_ENOBUFSTC == 100000){
+						printf("cnt_ENOBUFSTC: %lu \n",cnt_ENOBUFSTC);
+					}else if(cnt_ENOBUFSTC == 1000000){
+						printf("cnt_ENOBUFSTC: %lu \n",cnt_ENOBUFSTC);
+					}else if(cnt_ENOBUFSTC == 10000000){
+						printf("cnt_ENOBUFSTC: %lu \n",cnt_ENOBUFSTC);
+					}else{
+						;
+					}
+					
+				}
+				
+			}else{//ok
+				//printf("s3\n");
+			}
+			//printf("s4\n");
+		});
+
+
+	return;
+}
+
+
+
+//打开串口
+//"/dev/ttyUSB0"
+int open_uart_port(char* path)
+{
+	int fd;
+//	O_DSYNC等待物理 I/O 结束后再 write。在不影响读取新写入的数据的前提下，不等待文件属性更新。
+// O_RSYNC读(read)等待所有写入同一区域的写操作完成后再进行
+// O_SYNC等待物理 I/O 结束后再 write，包括更新文件属性的 I/O
+// O_NOCTTY terminal flag
+	fd=open( path, O_RDWR | O_NOCTTY );//O_NONBLOCK设置为非阻塞模式，在read时不会阻塞住，在读的时候将read放在while循环中，下一节篇文档将详细讲解阻塞和非阻塞
+//	printf("fd=%d\n",fd);
+	if(fd==-1)
+	{
+		perror("Can't Open SerialPort");
+	}
+
+	     /*恢复串口为阻塞状态*/ 
+    //  if(fcntl(fd, F_SETFL, 0)<0) 
+    //  	printf("fcntl failed!\n"); 
+    //  else 
+	// 	printf("fcntl=%d\n",fcntl(fd, F_SETFL,0)); 
+     /*测试是否为终端设备*/ 
+    //  if(isatty(STDIN_FILENO)==0) 
+	// 	printf("standard input is not a terminal device\n"); 
+    //  else 
+	// 	printf("isatty success!\n"); 
+    //  printf("fd-open=%d\n",fd);
+
+	
+	return fd;
+}
+
+int set_uart_opt(int fd,int nSpeed, char nEvent, int nBits, int nStop) 
+{ 
+     struct termios newtio,oldtio; 
+/*保存测试现有串口参数设置，在这里如果串口号等出错，会有相关的出错信息*/ 
+     if  ( tcgetattr( fd,&oldtio)  !=  0) {  
+      	perror("SetupSerial 1");
+		printf("tcgetattr( fd,&oldtio) -> %d\n",tcgetattr( fd,&oldtio)); 
+      	return -1; 
+     } 
+     bzero( &newtio, sizeof( newtio ) ); 
+/*步骤一，设置字符大小*/ 
+     newtio.c_cflag  |=  CLOCAL | CREAD;  
+     newtio.c_cflag &= ~CSIZE;  
+/*设置数据位*/ 
+     switch( nBits ) 
+     { 
+     case 7: 
+      	newtio.c_cflag |= CS7; 
+      break; 
+     case 8: 
+      	newtio.c_cflag |= CS8; 
+      break; 
+     } 
+/*设置奇偶校验位*/ 
+     switch( nEvent ) 
+     { 
+		case 'o':
+		case 'O': //奇数 
+			newtio.c_cflag |= PARENB; 
+			newtio.c_cflag |= PARODD; 
+			newtio.c_iflag |= (INPCK | ISTRIP); 
+		break; 
+		case 'e':
+		case 'E': //偶数 
+			newtio.c_iflag |= (INPCK | ISTRIP); 
+			newtio.c_cflag |= PARENB; 
+			newtio.c_cflag &= ~PARODD; 
+		break;
+		case 'n':
+		case 'N':  //无奇偶校验位 
+			newtio.c_cflag &= ~PARENB; 
+		break;
+		default:
+		break;
+     } 
+     /*设置波特率*/ 
+	switch( nSpeed ) 
+     { 
+    	case 2400: 
+			cfsetispeed(&newtio, B2400); 
+			cfsetospeed(&newtio, B2400); 
+		break; 
+		case 4800: 
+			cfsetispeed(&newtio, B4800); 
+			cfsetospeed(&newtio, B4800); 
+		break; 
+		case 9600: 
+			cfsetispeed(&newtio, B9600); 
+			cfsetospeed(&newtio, B9600); 
+		break; 
+		case 115200: 
+			cfsetispeed(&newtio, B115200); 
+			cfsetospeed(&newtio, B115200); 
+		break; 
+		case 460800: 
+			cfsetispeed(&newtio, B460800); 
+			cfsetospeed(&newtio, B460800); 
+		break; 
+		default: 
+			cfsetispeed(&newtio, B9600); 
+			cfsetospeed(&newtio, B9600); 
+     break; 
+     } 
+	/*设置停止位*/ 
+     if( nStop == 1 ) 
+      	newtio.c_cflag &=  ~CSTOPB; 
+     else if ( nStop == 2 ) 
+     	 newtio.c_cflag |=  CSTOPB; 
+	/*设置等待时间和最小接收字符*/ 
+     newtio.c_cc[VTIME]  = 0; 
+     newtio.c_cc[VMIN] = 0; 
+	/*处理未接收字符*/ 
+     tcflush(fd,TCIFLUSH); 
+	/*激活新配置*/ 
+	if((tcsetattr(fd,TCSANOW,&newtio))!=0) 
+     { 
+		perror("com set error"); 
+		return -1; 
+     } 
+     printf("set done!\n"); 
+     return 0; 
+} 
+
+
 /* time control relations */
 /*108   80   30   10*/
 #define STD_FRAME_FULL_BIT_NBR 		108  
 #define TARGET_CAN_RATE_KHZ    ((float)(1000))
 #define TARGET_CAN_RATE_HZ     ((float)(TARGET_CAN_RATE_KHZ) * 1000)
-#define REDUNDANT_TIME         5/* micro second */ //4,8,30(reduce some errs), 60,
+#define REDUNDANT_TIME         7/* micro second */ //4,8,30(reduce some errs), 60,5,7
 //#define STD_FRAME_INTER_TIME   1
 #define STD_FRAME_INTER_TIME   (float2int(((float)pow(10,6) / TARGET_CAN_RATE_HZ * (float)STD_FRAME_FULL_BIT_NBR)) + REDUNDANT_TIME)
 #define STD_FRAME_INTER_TIME2   (float2int(((float)pow(10,6) / TARGET_CAN_RATE_HZ * (float)STD_FRAME_FULL_BIT_NBR)) + REDUNDANT_TIME)
 // additional 2us for reduce alias.
 //  t标准 = 1 / 目标速率 *10^6 * 108 
 
-
+#define USE_UART   0
 /* fill can_frame with specific data, and send send it to out_fd */
 size_t send_with_canfrm(int out_fd, char* srcdata, size_t num, canid_t canid)
 {
@@ -339,7 +520,14 @@ size_t send_with_canfrm(int out_fd, char* srcdata, size_t num, canid_t canid)
 	struct timeval tv;
     //numSent = write(out_fd, data, num);
 	internal = STD_FRAME_INTER_TIME;
+#if USE_UART /* use uart clone , forward the data */
+	int fduart;
+	fduart = open_uart_port("/dev/ttyAL0");
+	set_uart_opt(fduart, 115200, 'E', 8, 1);
+	// write(fduart,"12345",5);
+	// printf("print: a 12345\n");
 
+#endif
     left = num;
     while(left){
 		gettimeofday(&tv,NULL);
@@ -350,7 +538,12 @@ size_t send_with_canfrm(int out_fd, char* srcdata, size_t num, canid_t canid)
         frm.can_id = canid;
         frm.can_dlc = sendlen;
         memcpy(frm.data, srcdata + num - left, sendlen);
-        sent = write(out_fd, &frm, sizeof(frm));
+
+        /*local send via local CAN or remote send via local socket*/
+#if USE_UART
+		write(fduart,&frm.data,frm.can_dlc);
+#endif
+		sent = write(out_fd, &frm, sizeof(frm));
         if(sent == -1) return -1;
         if(sent == 0) return -1;
         if(sent == sizeof(frm)){
@@ -368,6 +561,9 @@ size_t send_with_canfrm(int out_fd, char* srcdata, size_t num, canid_t canid)
 		//printf("time2 %llu\n",time2);
 
     }
+#if  USE_UART
+	close(fduart);
+#endif
     if (left != 0){
 		printf("send_with_canfrm failed: left != 0\n");
 		exit_with_kbclose();
@@ -378,11 +574,16 @@ size_t send_with_canfrm(int out_fd, char* srcdata, size_t num, canid_t canid)
 
 //#include "common.h"
 #define BUF_SIZE 8192
-static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
+static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int size )
 {
     off_t orig;
     char buf[BUF_SIZE];
-    int toRead, numRead, numSent, totSent;
+    int left, toRead, numRead, numSent, totSent;
+	progressbar *bar;
+
+	left = size;
+	totSent = 0;
+	bar = progressbar_new_with_format("Progress", left, "|#|");
 
     if (offset != NULL) {
         /* Save current file offset and set offset to value in '*offset' */
@@ -393,26 +594,31 @@ static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
             return -1;
     }
 
-    totSent = 0;
+    
     while (left > 0) {
-        toRead = left<BUF_SIZE ? left : BUF_SIZE;
+        toRead = left < BUF_SIZE ? left : BUF_SIZE;
 
         numRead = read(in_fd, buf, toRead);
         if (numRead == -1)
             return -1;
+		/* EOF */
         if (numRead == 0)
-            break;                      /* EOF */
+            break; 
 
         numSent = send_with_canfrm(out_fd, buf, numRead, TOPIC_HOST_IMG_STREAM);
         if (numSent == -1)
-            return -1;
-        if (numSent == 0) {               /* Should never happen */
+            exit(-1);
+        if (numSent == 0) {   /* Should never happen */
             perror("sendfile: send_with_canfrm() transferred 0 bytes");
             exit(-1);
         }
 
         left -= numSent;
         totSent += numSent;
+		for (size_t i = 0; i < numSent; i++){
+			progressbar_inc(bar);
+		}
+		
     }
 
     if (offset != NULL) {
@@ -424,12 +630,13 @@ static ssize_t sendfile(int out_fd, int in_fd, off_t * offset, int left )
         if (lseek(in_fd, orig, SEEK_SET) == -1)
             return -1;
     }
+	progressbar_finish(bar);
 	printf("Send with ORIGINAL format CAN-ID: %04X \n",TOPIC_HOST_IMG_STREAM);
 	printf("Transmit finished | total sent: %d bytes (without CAN struct wrapper)\n", totSent);
     return totSent;
 }
 
-/* send a file using pitech's MQHP protocol */
+
 /* 
 	typedef struct{
 		uint32_t start_sig;
@@ -518,22 +725,22 @@ int hashsum_cmdline(char* path, char* out_hash)
  
     memset(out_hash, 0, 96);  
  
-    //?ping?? 
+    //ping
     //sprintf(buffer, "ping -c 1 %s", ip);
 	sprintf(out_hash, "shasum %s", path);
     if (NULL == (fstream = popen(out_hash,"r"))){     
         return -1;      
     }   
  
-    //??????
+    //
     while (NULL != fgets(out_hash, 96, fstream)) {  
         //LOG_INFO("%s", buffer);
-        //?????????????
+        //
 		break;
 		found = 0;
         // if (strstr(buffer, "bytes from") != NULL)
         // {
-        //     //???
+        //     //
         //     found = 0;
         //     break;
         // }
@@ -543,7 +750,11 @@ int hashsum_cmdline(char* path, char* out_hash)
 
     return found;     
 }
-int printflag = 1;
+
+
+//int printflag = 1;
+
+/* send a file using pitech's MQHP protocol */
 static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * offset, int len )
 {
     off_t orig;
@@ -675,10 +886,10 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		packet->serial_nbr = sril_nbr;
 		packet->crc = CRC16( buf + MQ_HEADER_LEN, MQ_PACK_DATA_SIZE);
 //for DEBUG		
-		if (printflag){
-			printf("crc16: [%04X]\n",packet->crc);
-			printflag = 0;
-		}
+		// if (printflag){
+		// 	printf("crc16: [%04X]\n",packet->crc);
+		// 	printflag = 0;
+		// }
 		
 		/* then sent a packet! */
         numSent = send_with_canfrm(out_fd, buf, MQ_PACK_SIZE, TOPIC_HOST_IMG_STREAM);
@@ -806,8 +1017,8 @@ static int in4listen(unsigned short port)
 		perror("setsockopt");
 	}
 
-	//	?????
-	int nRecvBuf= 32*1024;//???32K
+	//	change rx buf
+	int nRecvBuf= 32*1024;//up to 32K
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF,(const char*)&nRecvBuf,sizeof(int));
 
 	if(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
@@ -846,6 +1057,13 @@ static int cansock(void)
 		errno = e;
 		return(-1);
 	}
+
+	/* disable default receive filter on this RAW socket */
+	/* This is obsolete as we do not read from the socket at all, but for */
+	/* this reason we can remove the receive list in the Kernel to save a */
+	/* little (really a very little!) CPU usage.                          */
+	setsockopt(fd, SOL_CAN_RAW, CAN_RAW_FILTER, NULL, 0);
+
 
 	memset(&addr, 0, sizeof(addr));
 
@@ -898,8 +1116,9 @@ static void broadcast_can(struct can_frame *frm)
 	time1 = (uint64_t)tv.tv_sec*1000000 + (uint64_t)tv.tv_usec;
 	ARRAY_FOREACH(ifaces, struct can_iface, iface, {
 			if(sendto(iface->fd, frm, sizeof(*frm), 0, (struct sockaddr*)&(iface->addr), sizeof(iface->addr)) < 0) {
-				//perror("CAN-sendto");
+				perror("CAN-sendto");
 				if(errno == ENOBUFS){
+					printf("CAN-driver buffer is full!");
 					cnt_ENOBUFS++;
 					if(cnt_ENOBUFS == 1){
 						printf("cnt_ENOBUFS: %lu \n",cnt_ENOBUFS);
@@ -925,7 +1144,10 @@ static void broadcast_can(struct can_frame *frm)
 					
 				}
 				
+			}else{//ok
+				;
 			}
+			
 		});
 	
 	/* wait for time slice expired */
@@ -947,16 +1169,24 @@ static void broadcast_net(struct can_frame *frm)
 	return;
 }
 
+#define NET_SEND_ORIGINAL_FORMAT     1
 static void broadcast_net2(struct can_frame *frm, struct conn *src)
 {
 	ARRAY_FOREACH(conns, struct conn, con, {
 			if(con->fd == src->fd) {
 				continue;
 			}
-
+#if NET_SEND_ORIGINAL_FORMAT
+			if(send(con->fd, &frm->data, frm->can_dlc, 0) < 0) {
+				perror("send");
+			}
+#else
 			if(send(con->fd, frm, sizeof(*frm), 0) < 0) {
 				perror("send");
 			}
+#endif
+
+
 		});
 	
 	return;
@@ -1184,7 +1414,7 @@ int main(int argc, char *argv[])
 										fprintf(stderr, "array_insert: %s\n", strerror(-err));
 										close(new_con->fd);
 										free(new_con);
-									}									
+									}
 								}
 							}
 						} else if(con->fd == canfd) {

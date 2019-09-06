@@ -1,6 +1,7 @@
 {
     "files.associations": {
         "array.h": "c",
-        "can_mqhp.h": "c"
+        "can_mqhp.h": "c",
+        "progressbar.h": "c"
     }
 }
