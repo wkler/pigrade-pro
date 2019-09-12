@@ -158,7 +158,7 @@ ip link set up can0
 
 
 
-
+ulimit -s 16384 
 ip -details -statistics link show can0
 ifconfig can0 txqueuelen 1000
 ip link set down can0
@@ -166,8 +166,10 @@ ip link set can0 type can tq 50 prop-seg 7 phase-seg1 7 phase-seg2 5 sjw 1
 ip link set up can0
 ./pigrade -p 8898
 ./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin
+./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin -t panel
 
 
+ulimit -s 16384 
 ip -details -statistics link show can1
 ifconfig can1 txqueuelen 1000
 ip link set down can1
@@ -175,6 +177,7 @@ ip link set can1 type can tq 50 prop-seg 7 phase-seg1 7 phase-seg2 5 sjw 1
 ip link set up can1
 ./pigrade -p 8898
 ./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin
+./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin -t panel
 
 <can_id>##<flags>{data}
 ./cansend can1 213##311223344

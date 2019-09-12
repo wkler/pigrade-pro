@@ -829,7 +829,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	sril_nbr = 0;
 	left = len;
 	//clear xor_buff 
-	memset(xor_buff, MQ_DIRTY_MARK, sizeof(xor_buff));
+	memset(xor_buff, 0x00, sizeof(xor_buff));
 	init_keyboard();
 	/* progress strip init */
 	bar = progressbar_new_with_format("Progress", totpktnbr, "|#|");
@@ -845,8 +845,8 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		/* prepare the packet to be send */
 
 		//first fill data part : numRead indicate the nbr read from the input file in a packet.
-		if(pkgcnt != MQ_GROUP_SIZE){
-			if(left){			
+		if(pkgcnt != MQ_GROUP_SIZE){//not the last pkt.
+			if(left){
 				toRead = left < MQ_PACK_DATA_SIZE ? left : MQ_PACK_DATA_SIZE;
 				numRead = read(in_fd, buf + MQ_HEADER_LEN, toRead);	
 				
@@ -868,7 +868,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 			}
 
 			if(need_add){ //fill the dummy data into empty part of the packet.
-				memset( buf + MQ_PACK_DATA_SIZE - need_add, MQ_DIRTY_MARK, need_add );
+				memset( buf + MQ_HEADER_LEN + MQ_PACK_DATA_SIZE - need_add, 0xEA, need_add );
 			}
 
 			//xor for FEC	
@@ -878,7 +878,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 			//fill data part 
 			memcpy( buf + MQ_HEADER_LEN, xor_buff, MQ_PACK_DATA_SIZE );
 			//clear xor_buff 
-			memset(xor_buff, MQ_DIRTY_MARK, MQ_PACK_DATA_SIZE);
+			memset(xor_buff, 0x00, MQ_PACK_DATA_SIZE);
 		}
 
 		//next fill header part
@@ -1526,7 +1526,7 @@ int main(int argc, char *argv[])
 				printf("Found file --> starting BINARY file data transfer.\n");
 				/* do hash */
 				hashsum_cmdline(filepath, hashsum);
-				printf("SHA: %s", hashsum );
+				printf("SHA-1: %s", hashsum );
 
 				if ( strcmp(img_type, "orig  ") == 0 ){
 					sent_total = sendfile(netfd, transfd, &offset, stat_buf.st_size);

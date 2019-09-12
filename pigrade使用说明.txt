@@ -1,0 +1,37 @@
+
+预备操作 配置启动CAN接口
+ip -details -statistics link show can0
+ifconfig can0 txqueuelen 1000
+ip link set down can0
+ip link set can0 type can tq 50 prop-seg 7 phase-seg1 7 phase-seg2 5 sjw 1 
+ip link set up can0
+
+pigrade --help 使用说明:
+
+	   "[INFO]: \n"
+	   "Provide an IP-to-CAN file transition with CAN-MQHP protocol for PITECH device upgrade\n"
+	   "By default, %s will not run as a daemon.\n"
+	   "By default, the transion protocol is file original format wrapped with can_frame_t struct\n"
+	   "The CAN-MQHP protocl will used at the option 'type' which is not orig type\n"
+	   "The file should smaller than 64 Mbytes\n"
+	   "It can listen for multi incoming connections on port %d.\n"
+	   "\n"
+	   "[OPTIONS]: \n"
+	   "  -h, --help        display this help and exit\n"
+	   "  -d, --daemon      run as a daemon (fork to the background)\n"
+	   "  -c, --connect     connect to the host specified by the next argument\n"
+	   "  -p, --port        use the port specified by the next argument\n"
+	   "  -I, --input       indicate the file path to be transfer(default from stdin)\nnote: max to 64MB file\n"
+	   "  -t, --type        specify the image type of the file( param: orig / pico / panel )\n"
+	   "  -v, --verbose     display the details of TX/RX info\n",
+
+
+
+例子：
+
+syshost启动pigrade 服务端模式 监听8898
+./pigrade -p 8898
+
+
+另外任意一台电脑（syshost本地也可）启动pigrade 客户端模式 连接到192.168.101.164：8898 发送的文件为~/image.bin   目标镜像为panel
+./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin -t panel
