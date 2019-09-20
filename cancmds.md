@@ -167,7 +167,7 @@ ip link set up can0
 ./pigrade -p 8898
 ./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin
 ./pigrade -c 192.168.101.164 -p 8898 -I ~/image.bin -t panel
-
+./pigrade -c 192.168.101.164 -p 8898 -u panel
 
 ulimit -s 16384 
 ip -details -statistics link show can1

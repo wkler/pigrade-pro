@@ -96,6 +96,7 @@ typedef struct __packed {
 static unsigned short CRC16 ( unsigned char *puchMsg, unsigned short usDataLen );
 static void broadcast_can(struct can_frame *frm);
 
+char hashsum[96];
 
 
 static void hexdump(const void *_ptr, size_t len)
@@ -812,6 +813,7 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	usleep( 100*1000 ); 
 
 	msg.cmd = CMD_START_SEND_IMG;/* config the transision img type */
+	msg.nodeid = NODE_ID_BROADCAST;
 	memcpy(msg.img_type, img_type, 6 );//"pico" or "panel"
 	ret = send_with_canfrm( out_fd, &msg, sizeof(hostmsg), TOPIC_HOST_GLOBAL_CMD);
 	if(ret != sizeof(hostmsg)){
@@ -923,6 +925,12 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		}
 
     }
+    /* send 20bytes hash value */
+	ret = send_with_canfrm( out_fd, &hashsum, 40, TOPIC_HOST_IMG_STREAM);
+	if(ret != 40){
+		printf("Error: hash value cannot send !\n");
+		exit_with_kbclose();
+	}
 
     if (offset != NULL) {
         /* Return updated file offset in '*offset', and reset the file offset
@@ -1237,6 +1245,7 @@ int main(int argc, char *argv[])
 	//FILE *infile = stdin;
 	char *filepath = "no-spcecify";
 	char *img_type = "orig  ";
+	int exec_upgrade = 0;
 	
 
 	port = CONFIG_INET_PORT;
@@ -1286,6 +1295,7 @@ int main(int argc, char *argv[])
 				   "  -p, --port        use the port specified by the next argument\n"
 				   "  -I, --input       indicate the file path to be transfer(default from stdin)\nnote: max to 64MB file\n"
 				   "  -t, --type        specify the image type of the file( param: orig / pico / panel )\n"
+				   "  -u, --upgrade     send a execute image upgrade command( param: orig / pico / panel )\n"
 				   "  -v, --verbose     display the details of TX/RX info\n",
 				   argv[0], CONFIG_MY_NAME, CONFIG_INET_PORT);
 			return(1);
@@ -1313,7 +1323,22 @@ int main(int argc, char *argv[])
 				}	
 
 			} else {
-				fprintf(stderr, "Expected image type after --input\n");
+				fprintf(stderr, "Expected image type after --type\n");
+				return(1);
+			}
+		} else if(strcmp(argv[ret_val], "--upgrade") == 0 || strcmp(argv[ret_val], "-u") == 0) {
+			if(++ret_val < argc) {
+				if (argv[ret_val][1] == 'a'){
+					img_type = "panel "; //keep 6 bytes.
+				}else if(argv[ret_val][1] == 'i'){
+					img_type = "pico  "; //keep 6 bytes.
+				}else{
+					img_type = "orig  "; //keep 6 bytes.
+				}
+				exec_upgrade = 1;
+
+			} else {
+				fprintf(stderr, "Expected image type after --upgrade\n");
 				return(1);
 			}
 		} else if(strcmp(argv[ret_val], "--verbose") == 0 || strcmp(argv[ret_val], "-v") == 0) {
@@ -1506,7 +1531,22 @@ int main(int argc, char *argv[])
 			int sent_total = 0;
 			char cwd[96];
 			char *ret;
-			char hashsum[96];
+			uint32_t re;
+			hostmsg msg;
+
+			if (exec_upgrade == 1){
+				msg.cmd = CMD_EXE_UPGRADE;
+				msg.nodeid = NODE_ID_BROADCAST;
+				memcpy(msg.img_type, img_type, 6 );//"pico" or "panel"
+				re = send_with_canfrm( netfd, &msg, sizeof(hostmsg), TOPIC_HOST_GLOBAL_CMD);
+				if(re != sizeof(hostmsg)){
+					printf("Error: CMD_EXE_UPGRADE cannot send !\n");
+					exit(-1);
+				}
+				printf("LOG: send CMD_EXE_UPGRADE request !\n");
+				exit(EXIT_SUCCESS);
+			}
+			
 
 			if(strcmp(filepath, "no-spcecify") == 0){
 				printf("file path no spcecify, use default path.\n");
