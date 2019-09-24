@@ -821,8 +821,8 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 		exit(-1);
 	}
 	printf("LOG: send START_SEND_IMG request !\n");
-	/* wait at least 500ms for panel prepare receive packet */
-	usleep( 2*1000*1000 ); 
+	/* wait at least 10s for panel prepare receive packet include erase flash */
+	usleep( 10*1000*1000 ); 
 	/* Preprocess */
 	totpktnbr = calc_total_pkt_nbr( len );
 	totpktnbr_const = totpktnbr;
