@@ -73,8 +73,8 @@
 //__attribute__ ((packed));
 
 typedef struct __packed {
-	uint8_t cmd;
 	uint8_t nodeid;
+	uint8_t cmd;
 	//uint8_t content[0];
 	union __packed{
 		struct __packed{ 
@@ -706,7 +706,11 @@ int calc_total_pkt_nbr(int len)
 	integer = minpktnbr / (MQ_GROUP_SIZE - 1);
 	remain = minpktnbr - ( integer * (MQ_GROUP_SIZE - 1) );
 	//additional redundant and dummy packet to satisfy condition: multiple of MQ_GROUP_SIZE
-	need_add_pkt = integer + MQ_GROUP_SIZE - remain;
+	if (remain){
+		need_add_pkt = integer + MQ_GROUP_SIZE - remain;
+	}else{
+		need_add_pkt = integer;
+	}
 	totpktnbr = minpktnbr + need_add_pkt;
 
 	return totpktnbr;
@@ -822,7 +826,11 @@ static ssize_t sendfileuseMQHP(char *img_type, int out_fd, int in_fd, off_t * of
 	}
 	printf("LOG: send START_SEND_IMG request !\n");
 	/* wait at least 10s for panel prepare receive packet include erase flash */
-	usleep( 10*1000*1000 ); 
+	if (msg.img_type[1] == 'a'){
+		usleep( 5*1000*1000 );
+	}else{
+		usleep( 16*1000*1000 );
+	}
 	/* Preprocess */
 	totpktnbr = calc_total_pkt_nbr( len );
 	totpktnbr_const = totpktnbr;
